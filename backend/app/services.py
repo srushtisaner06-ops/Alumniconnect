@@ -36,7 +36,7 @@ def alumnus_dict(c, row, with_offers=True):
     return d
 
 
-def import_students(c, students, graduation_year, replace=False, final_year_students=None):
+def import_students(c, students, graduation_year, replace=False, final_year_students=None, import_id=None):
     if replace:
         for t in ("reminder_log", "undo_actions", "offers", "alumni"):
             c.execute(f"DELETE FROM {t}")
@@ -52,6 +52,8 @@ def import_students(c, students, graduation_year, replace=False, final_year_stud
             aid = c.execute("INSERT INTO alumni(sr_no,name,prn,class_div,phone,email,graduation_year,token) VALUES(?,?,?,?,?,?,?,?)",
                             (s["sr_no"], s["name"], s["prn"], s["class_div"], s["phone"], s["email"], graduation_year, new_token())).lastrowid
             added += 1
+        if import_id:   # remember which file this alumnus came from (an alumnus can belong to several files)
+            c.execute("INSERT OR IGNORE INTO import_batch_alumni(import_id,alumni_id) VALUES(?,?)", (import_id, aid))
         have = {(o["employer"].lower(), o["package_lpa"], (o["position"] or "").lower())
                 for o in c.execute("SELECT employer,package_lpa,position FROM offers WHERE alumni_id=?", (aid,))}
         for o in s["offers"]:
@@ -101,6 +103,109 @@ def undo_last(c):
     return r["label"]
 
 
+# ---------------------------------------------------------------- recipient selection
+MAX_SELECTION_IDS = 5000
+
+
+def normalize_selection(raw):
+    """Clean a client-supplied selection into {"all", "batches", "import_ids", "alumni_ids"}."""
+    raw = raw or {}
+
+    def ints(key, lo=1, hi=10 ** 9):
+        out = []
+        for v in raw.get(key) or []:
+            try:
+                n = int(v)
+            except (TypeError, ValueError):
+                continue
+            if lo <= n <= hi and n not in out:
+                out.append(n)
+        return out[:MAX_SELECTION_IDS]
+
+    return {"all": bool(raw.get("all")), "batches": ints("batches", 1990, 2100),
+            "import_ids": ints("import_ids"), "alumni_ids": ints("alumni_ids")}
+
+
+def selection_is_empty(sel):
+    return not sel["all"] and not (sel["batches"] or sel["import_ids"] or sel["alumni_ids"])
+
+
+def _chunks(ids, size=500):          # stay well under SQLite's bound-variable limit
+    for i in range(0, len(ids), size):
+        yield ids[i:i + size]
+
+
+def _marks(chunk):
+    return ",".join("?" * len(chunk))
+
+
+def resolve_selection(c, sel):
+    """Alumni ids for a selection. Returns a set, so overlapping groups never produce a duplicate recipient."""
+    if sel["all"]:
+        return {r["id"] for r in c.execute("SELECT id FROM alumni")}
+    out = set()
+    for ch in _chunks(sel["batches"]):
+        out |= {r["id"] for r in c.execute(f"SELECT id FROM alumni WHERE graduation_year IN ({_marks(ch)})", ch)}
+    for ch in _chunks(sel["import_ids"]):
+        out |= {r["alumni_id"] for r in c.execute(f"SELECT alumni_id FROM import_batch_alumni WHERE import_id IN ({_marks(ch)})", ch)}
+    for ch in _chunks(sel["alumni_ids"]):
+        out |= {r["id"] for r in c.execute(f"SELECT id FROM alumni WHERE id IN ({_marks(ch)})", ch)}
+    return out
+
+
+def get_selection(c, camp_id):
+    """The campaign's saved audience, or None for campaigns created before this feature (= everyone)."""
+    r = c.execute("SELECT config FROM campaign_selection WHERE campaign_id=?", (camp_id,)).fetchone()
+    return normalize_selection(json.loads(r["config"])) if r else None
+
+
+def save_selection(c, camp_id, sel):
+    c.execute("INSERT INTO campaign_selection(campaign_id,config) VALUES(?,?) "
+              "ON CONFLICT(campaign_id) DO UPDATE SET config=excluded.config", (camp_id, json.dumps(sel)))
+
+
+def campaign_recipient_ids(c, camp_id):
+    """Set of alumni ids the campaign may contact, or None = no restriction."""
+    sel = get_selection(c, camp_id)
+    return None if sel is None else resolve_selection(c, sel)
+
+
+def people_for(c, ids):
+    out = []
+    for ch in _chunks(list(ids)):
+        out += [dict(r) for r in c.execute(f"SELECT id,name,prn,graduation_year FROM alumni WHERE id IN ({_marks(ch)}) ORDER BY name", ch)]
+    return out
+
+
+def preview_recipients(c, sel, channel, max_attempts):
+    """Live counts shown before a campaign starts. Buckets are exclusive and add up to `selected`."""
+    ids = sorted(resolve_selection(c, sel))
+    out = {"selected": len(ids), "eligible": 0, "completed": 0, "unsubscribed": 0, "no_contact": 0, "attempts_used": 0}
+    camp = {"channel": channel}
+    for ch in _chunks(ids):
+        for a in c.execute(f"SELECT * FROM alumni WHERE id IN ({_marks(ch)})", ch):
+            if a["status"] == "COMPLETED":
+                out["completed"] += 1
+            elif a["unsubscribed"]:
+                out["unsubscribed"] += 1
+            elif not _channels(camp, a):
+                out["no_contact"] += 1          # no usable email / Telegram chat id for this channel
+            elif a["reminders_sent"] >= max_attempts:
+                out["attempts_used"] += 1
+            else:
+                out["eligible"] += 1
+    return out
+
+
+def recipient_options(c):
+    batches = [dict(r) for r in c.execute(
+        "SELECT graduation_year year, COUNT(*) total FROM alumni GROUP BY graduation_year ORDER BY graduation_year DESC")]
+    imports = [dict(r) for r in c.execute(
+        """SELECT b.id, b.filename, b.graduation_year, b.created_at, COUNT(m.alumni_id) total
+           FROM import_batches b LEFT JOIN import_batch_alumni m ON m.import_id=b.id GROUP BY b.id ORDER BY b.id DESC""")]
+    return {"batches": batches, "imports": imports}
+
+
 # ---------------------------------------------------------------- reminder worker
 def _priority(a, offers):
     days = (now() - (parse_ts(a["created_at"]) or now())).days
@@ -120,7 +225,10 @@ def _channels(camp, a):
 def eligible(c, camp):
     t = now()
     out = []
+    sel = campaign_recipient_ids(c, camp["id"])      # None = everyone (legacy campaigns)
     for a in c.execute("SELECT * FROM alumni WHERE status='PENDING' AND unsubscribed=0 AND reminders_sent<?", (camp["max_attempts"],)).fetchall():
+        if sel is not None and a["id"] not in sel:
+            continue
         last = parse_ts(a["last_reminder_at"])
         if last and t - last < timedelta(hours=camp["interval_hours"]):
             continue
@@ -147,7 +255,10 @@ MAX_RETRIES = 3
 def eligible_total(c, camp):
     """Alumni who could still be reminded now or later (ignores the interval)."""
     n = 0
+    sel = campaign_recipient_ids(c, camp["id"])
     for a in c.execute("SELECT * FROM alumni WHERE status='PENDING' AND unsubscribed=0 AND reminders_sent<?", (camp["max_attempts"],)).fetchall():
+        if sel is not None and a["id"] not in sel:
+            continue
         if _channels(camp, a):
             n += 1
     return n
