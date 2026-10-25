@@ -1,7 +1,11 @@
 import os
 from pathlib import Path
+from dotenv import load_dotenv
 
 BASE = Path(__file__).resolve().parent.parent
+
+load_dotenv(BASE / ".env", override=False)
+AUTOLOAD_REFERENCE = os.getenv("AUTOLOAD_REFERENCE", "0") == "1"
 DB_PATH = os.getenv("DB_PATH", str(BASE / "data" / "alumni.db"))
 ENGINE_PATH = os.getenv("ENGINE_PATH", str(BASE.parent / "engine" / "build" / "engine"))
 REFERENCE_XLSX = BASE / "data" / "reference_placement.xlsx"

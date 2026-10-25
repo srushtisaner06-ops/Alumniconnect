@@ -41,8 +41,8 @@ async def lifespan(app):
         if not c.execute("SELECT 1 FROM users").fetchone():
             c.execute("INSERT INTO users(email,password_hash) VALUES(?,?)", (config.ADMIN_EMAIL, hash_password(config.ADMIN_PASSWORD)))
         # First run only: load the real placement sheet through the same validated importer.
-        if os.getenv("AUTOLOAD_REFERENCE", "1") == "1" and not c.execute("SELECT 1 FROM alumni").fetchone() \
-                and config.REFERENCE_XLSX.exists():
+        if config.AUTOLOAD_REFERENCE and not c.execute("SELECT 1 FROM alumni").fetchone() \
+        and config.REFERENCE_XLSX.exists():
             rep = importer.parse(config.REFERENCE_XLSX.name, config.REFERENCE_XLSX.read_bytes())
             if rep["ok"]:
                 services.import_students(c, rep["students"], rep["graduation_year"], final_year_students=rep["final_year_students"])

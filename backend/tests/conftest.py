@@ -7,6 +7,7 @@ tmp = tempfile.mkdtemp()
 os.environ["DB_PATH"] = os.path.join(tmp, "test.db")
 os.environ["WORKER_ENABLED"] = "0"
 os.environ["ADMIN_PASSWORD"] = "test-pass"
+os.environ["AUTOLOAD_REFERENCE"] = "1"
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import pytest
