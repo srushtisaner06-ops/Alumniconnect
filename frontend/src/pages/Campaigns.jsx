@@ -131,7 +131,11 @@ function RecipientPicker({ sel, setSel, people, setPeople, channel, maxAttempts 
 
   return (
     <fieldset className="rounded-lg border border-slate-200 p-4">
+<<<<<<< HEAD
       <legend className="flex items-center gap-1.5 px-1 text-sm font-medium"><Users className="h-4 w-4" />Who should receive this round?</legend>
+=======
+      <legend className="flex items-center gap-1.5 px-1 text-sm font-medium"><Users className="h-4 w-4" />Who should receive this campaign?</legend>
+>>>>>>> e30e88663ccc11f30c737db4f4fd79097ee5595f
       <p className="mb-3 text-xs text-slate-500">Only alumni in the chosen groups who are also eligible (pending, subscribed, reachable, attempts left) are contacted. Overlapping groups never send twice.</p>
       <div className="mb-3 flex flex-wrap gap-4 text-sm">
         <label className="flex items-center gap-2"><input type="radio" name="rmode" checked={!sel.all} onChange={() => setSel((s) => ({ ...s, all: false }))} />Choose recipients</label>
@@ -220,11 +224,19 @@ function Editor({ initial, placeholders, onClose, onSaved }) {
   const preview = (t) => t.replace(/\{\{\s*(\w+)\s*\}\}/g, (m, k) => sample[k] ?? m)
   async function save(e) {
     e.preventDefault(); setErr(null)
+<<<<<<< HEAD
     if (isEmptySel(sel)) { setErr('Choose who receives this round: a graduation batch, an imported file, individual alumni, or Everyone.'); return }
     setBusy(true)
     const body = { ...f, interval_hours: +f.interval_hours, max_attempts: +f.max_attempts, batch_size: +f.batch_size, deadline: f.deadline || null, recipients: sel }
     ;['id', 'status', 'created_at', 'started_at', 'sent', 'failed', 'eligible_now', 'reachable', 'recipient_total'].forEach((k) => delete body[k])
     try { await api(f.id ? `/campaigns/${f.id}` : '/campaigns', { method: f.id ? 'PUT' : 'POST', body }); toast('Round saved'); onSaved() }
+=======
+    if (isEmptySel(sel)) { setErr('Choose who receives this campaign: a graduation batch, an imported file, individual alumni, or Everyone.'); return }
+    setBusy(true)
+    const body = { ...f, interval_hours: +f.interval_hours, max_attempts: +f.max_attempts, batch_size: +f.batch_size, deadline: f.deadline || null, recipients: sel }
+    ;['id', 'status', 'created_at', 'started_at', 'sent', 'failed', 'eligible_now', 'reachable', 'recipient_total'].forEach((k) => delete body[k])
+    try { await api(f.id ? `/campaigns/${f.id}` : '/campaigns', { method: f.id ? 'PUT' : 'POST', body }); toast('Campaign saved'); onSaved() }
+>>>>>>> e30e88663ccc11f30c737db4f4fd79097ee5595f
     catch (x) { setErr(x) } finally { setBusy(false) }
   }
   const chips = placeholders.map((p) => <code key={p} className="rounded bg-slate-100 px-1.5 py-0.5 text-xs">{`{{${p}}}`}</code>)

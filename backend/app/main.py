@@ -316,9 +316,6 @@ class CampaignIn(BaseModel):
 def _validate_campaign(b: CampaignIn):
     if b.channel not in ("email", "telegram", "both"):
         raise HTTPException(422, "channel must be email, telegram or both")
-    if b.recipients is not None and services.selection_is_empty(services.normalize_selection(b.recipients)):
-        raise HTTPException(422, "Choose who receives this round: a graduation batch, an imported file, "
-                                 "individual alumni, or Everyone.")
     bad = notifier.unknown_placeholders(b.email_subject, b.email_body, b.telegram_body)
     if bad:
         raise HTTPException(422, f"Unknown placeholder(s): {', '.join('{{' + x + '}}' for x in bad)}. "
