@@ -50,8 +50,8 @@ export default function Dashboard() {
         </div>
       </div>
       <div className="card mt-4 p-4">
-        <h2 className="mb-2 font-medium">Campaigns</h2>
-        {data.campaigns.length === 0 ? <p className="text-sm text-slate-500">No campaign yet. <Link className="text-indigo-600 underline" to="/dashboard/campaigns">Create one</Link>.</p>
+        <h2 className="mb-2 font-medium">Reminder rounds</h2>
+        {data.campaigns.length === 0 ? <p className="text-sm text-slate-500">No reminder round yet. <Link className="text-indigo-600 underline" to="/dashboard/campaigns">Create one</Link>.</p>
           : data.campaigns.map((c) => <div key={c.id} className="flex items-center justify-between py-1 text-sm"><span>{c.name}</span><Badge tone={c.status === 'RUNNING' ? 'green' : 'slate'}>{c.status}</Badge></div>)}
       </div>
     </>

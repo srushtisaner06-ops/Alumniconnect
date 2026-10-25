@@ -6,7 +6,7 @@ import httpx
 
 from . import config
 
-PLACEHOLDERS = {"name", "batch", "unique_link", "prn", "employer"}
+PLACEHOLDERS = {"name", "batch", "unique_link", "telegram_link", "prn", "employer"}
 _PH = re.compile(r"\{\{\s*(\w+)\s*\}\}")
 
 
@@ -17,6 +17,7 @@ def unknown_placeholders(*texts):
 def render(template, alumnus):
     ctx = {"name": alumnus["name"], "batch": str(alumnus["graduation_year"]), "prn": alumnus["prn"],
            "unique_link": f"{config.PUBLIC_URL}/update?token={alumnus['token']}",
+           "telegram_link": telegram_connect_link(alumnus["token"]),
            "employer": alumnus.get("employer") or ""}
     return _PH.sub(lambda m: ctx.get(m.group(1), m.group(0)), template)
 
@@ -31,6 +32,37 @@ def email_configured():
 
 def telegram_configured():
     return bool(config.TELEGRAM_BOT_TOKEN)
+
+
+_bot_username = None
+
+
+def telegram_bot_username():
+    """Bot username without '@'. From TELEGRAM_BOT_USERNAME, else asked from Telegram once (getMe)."""
+    global _bot_username
+    if config.TELEGRAM_BOT_USERNAME:
+        return config.TELEGRAM_BOT_USERNAME.lstrip("@")
+    if _bot_username is None and telegram_configured():
+        try:
+            r = httpx.get(f"https://api.telegram.org/bot{config.TELEGRAM_BOT_TOKEN}/getMe", timeout=20)
+            r.raise_for_status()
+            _bot_username = r.json()["result"]["username"]
+        except Exception as e:
+            print("telegram getMe failed:", e)
+    return _bot_username or ""
+
+
+def telegram_connect_link(token):
+    """t.me link that, when tapped and 'Start' is pressed, tells the bot which alumnus this chat belongs to."""
+    u = telegram_bot_username()
+    return f"https://t.me/{u}?start={token}" if u else "(Telegram bot not configured)"
+
+
+def fetch_telegram_updates(offset):
+    r = httpx.get(f"https://api.telegram.org/bot{config.TELEGRAM_BOT_TOKEN}/getUpdates",
+                  params={"offset": offset, "timeout": 0, "allowed_updates": '["message"]'}, timeout=20)
+    r.raise_for_status()
+    return r.json().get("result", [])
 
 
 def send_email(to, subject, body):

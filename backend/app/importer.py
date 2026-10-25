@@ -27,7 +27,10 @@ def norm(h):
     return re.sub(r"[^a-z0-9]+", "", str(h or "").lower())
 
 
+# Optional extra column: lets you pre-fill the Telegram chat id of test contacts.
+OPTIONAL_COLUMNS = [("telegram_chat_id", "Telegram Chat ID")]
 HEADER_LOOKUP = {norm(h): k for k, h, _ in COLUMNS}
+HEADER_LOOKUP.update({norm(h): k for k, h in OPTIONAL_COLUMNS})
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 AY_RE = re.compile(r"AY\s*:?\s*(\d{4})\s*[-–/]\s*(\d{2,4})", re.I)
 
@@ -184,6 +187,7 @@ def parse(filename, content, graduation_year=None):
         r = rows[ridx]
         xl = ridx + 1
         vals = {k: cell(r, k) for k, _, _ in COLUMNS}
+        vals["telegram_chat_id"] = cell(r, "telegram_chat_id") if "telegram_chat_id" in colmap else None
         if not any(_clean_text(vals[k]) for k in ("name", "prn", "email", "employer", "phone")):
             continue  # blank / label row (e.g. "AY: 2025-26")
         report["total_rows"] += 1
@@ -224,6 +228,12 @@ def parse(filename, content, graduation_year=None):
             err("Package", f"Package must be a number (LPA), got '{_clean_text(vals['package'])}'")
             pkg = None
 
+        tg = _clean_text(vals["telegram_chat_id"])
+        if tg and not re.fullmatch(r"-?\d{5,20}", tg):
+            report["warnings"].append({"row": xl, "column": "Telegram Chat ID",
+                                       "message": f"Telegram Chat ID '{tg}' is not a number; ignored"})
+            tg = ""
+
         iso, rawdate = _date(vals["letter_ref"])
         ref = iso or rawdate
         link = _clean_text(vals["letter_link"])
@@ -244,7 +254,8 @@ def parse(filename, content, graduation_year=None):
         if s is None:
             sr = vals["sr_no"]
             students[prn] = {"sr_no": int(sr) if isinstance(sr, (int, float)) else None, "name": name, "prn": prn,
-                             "class_div": class_div, "phone": phone, "email": email, "offers": [offer]}
+                             "class_div": class_div, "phone": phone, "email": email, "offers": [offer],
+                             "telegram_chat_id": tg or None}
         else:
             if s["name"].lower() != name.lower():
                 report["warnings"].append({"row": xl, "column": "Name of the Student", "message":
@@ -252,6 +263,8 @@ def parse(filename, content, graduation_year=None):
             if (s["email"], s["phone"]) != (email, phone):
                 report["warnings"].append({"row": xl, "column": None, "message":
                     f"PRN {prn} has different contact details in another row; first kept"})
+            if tg and not s.get("telegram_chat_id"):
+                s["telegram_chat_id"] = tg
             s["offers"].append(offer)
 
     report["students"] = list(students.values())

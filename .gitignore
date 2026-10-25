@@ -6,3 +6,8 @@ __pycache__/
 backend/data/*.db
 engine/build/
 .pytest_cache/
+backend/.venv/
+.venv/
+backend/data/*.xlsx
+backend/data/*.db
+*.zip

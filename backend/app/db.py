@@ -41,6 +41,21 @@ CREATE TABLE IF NOT EXISTS undo_actions(
   id INTEGER PRIMARY KEY, type TEXT NOT NULL, payload TEXT NOT NULL,
   label TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')));
 CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT);
+
+-- Recipient selection: import history + a saved audience per campaign.
+-- Only new tables, so an existing database upgrades itself on the next start.
+CREATE TABLE IF NOT EXISTS import_batches(
+  id INTEGER PRIMARY KEY, filename TEXT NOT NULL, graduation_year INTEGER,
+  added INTEGER NOT NULL DEFAULT 0, updated INTEGER NOT NULL DEFAULT 0, unique_students INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')));
+CREATE TABLE IF NOT EXISTS import_batch_alumni(
+  import_id INTEGER NOT NULL REFERENCES import_batches(id) ON DELETE CASCADE,
+  alumni_id INTEGER NOT NULL REFERENCES alumni(id) ON DELETE CASCADE,
+  PRIMARY KEY (import_id, alumni_id));
+CREATE INDEX IF NOT EXISTS idx_iba_alumni ON import_batch_alumni(alumni_id);
+-- No row for a campaign = legacy behaviour (everyone). config is JSON: {"all":bool,"batches":[],"import_ids":[],"alumni_ids":[]}
+CREATE TABLE IF NOT EXISTS campaign_selection(
+  campaign_id INTEGER PRIMARY KEY REFERENCES campaigns(id) ON DELETE CASCADE, config TEXT NOT NULL);
 """
 
 

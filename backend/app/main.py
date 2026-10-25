@@ -21,6 +21,7 @@ from .security import current_user, hash_password, make_jwt, verify_password
 DEFAULT_EMAIL_SUBJECT = "Please update your career details – {{batch}} batch"
 DEFAULT_EMAIL_BODY = ("Dear {{name}},\n\nThe department is collecting career information from the {{batch}} batch "
                       "for accreditation reports. It takes about two minutes.\n\nYour personal link:\n{{unique_link}}\n\n"
+                      "Want reminders on Telegram instead? Open this link and press Start:\n{{telegram_link}}\n\n"
                       "Thank you,\nDepartment of Computer Science (AI)")
 DEFAULT_TELEGRAM = "Hi {{name}}, please update your career details ({{batch}} batch): {{unique_link}}"
 
@@ -32,6 +33,15 @@ async def _worker():
             await asyncio.to_thread(services.run_all_running)
         except Exception as e:  # never let the worker die
             print("worker error:", e)
+
+
+async def _telegram_poller():
+    while True:
+        await asyncio.sleep(config.TELEGRAM_POLL_SECONDS)
+        try:
+            await asyncio.to_thread(services.poll_telegram)
+        except Exception as e:  # e.g. no network; keep trying
+            print("telegram poll error:", e)
 
 
 @asynccontextmanager
@@ -46,10 +56,10 @@ async def lifespan(app):
             rep = importer.parse(config.REFERENCE_XLSX.name, config.REFERENCE_XLSX.read_bytes())
             if rep["ok"]:
                 services.import_students(c, rep["students"], rep["graduation_year"], final_year_students=rep["final_year_students"])
-    task = asyncio.create_task(_worker()) if config.WORKER_ENABLED else None
+    tasks = [asyncio.create_task(_worker()), asyncio.create_task(_telegram_poller())] if config.WORKER_ENABLED else []
     yield
-    if task:
-        task.cancel()
+    for t in tasks:
+        t.cancel()
 
 
 app = FastAPI(title="AlumniConnect", lifespan=lifespan)
@@ -274,8 +284,15 @@ async def import_commit(file: UploadFile = File(...), graduation_year: Optional[
     if fatal or (rep["errors"] and not skip_invalid):
         raise HTTPException(422, {"message": "File does not match the reference format", "report": _public_report(rep)})
     with db() as c:
+        if replace:
+            c.execute("DELETE FROM import_batches")   # their alumni are wiped below, so the file history goes too
+        imp = c.execute("INSERT INTO import_batches(filename,graduation_year) VALUES(?,?)",
+                        ((file.filename or "upload")[:200], rep["graduation_year"])).lastrowid
         res = services.import_students(c, rep["students"], rep["graduation_year"], replace=replace,
-                                       final_year_students=rep["final_year_students"])
+                                       final_year_students=rep["final_year_students"], import_id=imp)
+        c.execute("UPDATE import_batches SET added=?, updated=?, unique_students=? WHERE id=?",
+                  (res["added"], res["updated"], len(rep["students"]), imp))
+    res["import_id"] = imp
     res["skipped_rows"] = len({e["row"] for e in rep["errors"] if e["row"]})
     return {"ok": True, **res, "unique_students": len(rep["students"]), "replaced": replace}
 
@@ -291,11 +308,17 @@ class CampaignIn(BaseModel):
     email_subject: str = DEFAULT_EMAIL_SUBJECT
     email_body: str = DEFAULT_EMAIL_BODY
     telegram_body: str = DEFAULT_TELEGRAM
+    # {"all": bool, "batches": [years], "import_ids": [ids], "alumni_ids": [ids]}.
+    # Omitted (null) = leave unchanged on update / everyone on create (the behaviour before this feature).
+    recipients: Optional[dict] = None
 
 
 def _validate_campaign(b: CampaignIn):
     if b.channel not in ("email", "telegram", "both"):
         raise HTTPException(422, "channel must be email, telegram or both")
+    if b.recipients is not None and services.selection_is_empty(services.normalize_selection(b.recipients)):
+        raise HTTPException(422, "Choose who receives this round: a graduation batch, an imported file, "
+                                 "individual alumni, or Everyone.")
     bad = notifier.unknown_placeholders(b.email_subject, b.email_body, b.telegram_body)
     if bad:
         raise HTTPException(422, f"Unknown placeholder(s): {', '.join('{{' + x + '}}' for x in bad)}. "
@@ -313,6 +336,13 @@ def _campaign_stats(c, row):
     d["failed"] = c.execute("SELECT COUNT(*) n FROM reminder_log WHERE campaign_id=? AND status='FAILED'", (row["id"],)).fetchone()["n"]
     d["eligible_now"] = len(services.eligible(c, row))
     d["reachable"] = services.eligible_total(c, row)
+    sel = services.get_selection(c, row["id"])
+    if sel is None:   # created before recipient selection existed: contacts everyone
+        d["recipients"] = {"all": True, "batches": [], "import_ids": [], "alumni_ids": [], "people": [], "legacy": True}
+        d["recipient_total"] = c.execute("SELECT COUNT(*) n FROM alumni").fetchone()["n"]
+    else:
+        d["recipients"] = {**sel, "people": services.people_for(c, sel["alumni_ids"])}
+        d["recipient_total"] = len(services.resolve_selection(c, sel))
     return d
 
 
@@ -334,6 +364,8 @@ def create_campaign(b: CampaignIn, _=Depends(current_user)):
         cid = c.execute("""INSERT INTO campaigns(name,channel,interval_hours,max_attempts,batch_size,deadline,email_subject,email_body,telegram_body)
                            VALUES(?,?,?,?,?,?,?,?,?)""", (b.name, b.channel, b.interval_hours, b.max_attempts, b.batch_size, deadline,
                                                            b.email_subject, b.email_body, b.telegram_body)).lastrowid
+        if b.recipients is not None:
+            services.save_selection(c, cid, services.normalize_selection(b.recipients))
     return {"id": cid}
 
 
@@ -347,7 +379,42 @@ def update_campaign(cid: int, b: CampaignIn, _=Depends(current_user)):
                      email_subject=?,email_body=?,telegram_body=? WHERE id=?""",
                   (b.name, b.channel, b.interval_hours, b.max_attempts, b.batch_size, b.deadline, b.email_subject,
                    b.email_body, b.telegram_body, cid))
+        if b.recipients is not None:
+            services.save_selection(c, cid, services.normalize_selection(b.recipients))
     return {"ok": True}
+
+
+# ---- recipient selection helpers (used by the campaign editor)
+@app.get("/api/recipients/options")
+def recipient_options(_=Depends(current_user)):
+    with db() as c:
+        return services.recipient_options(c)
+
+
+@app.get("/api/recipients/search")
+def recipient_search(q: str = "", _=Depends(current_user)):
+    q = q.strip()
+    if len(q) < 2:
+        return {"items": []}
+    like = f"%{q}%"
+    with db() as c:
+        rows = c.execute("SELECT id,name,prn,email,graduation_year,status FROM alumni "
+                         "WHERE name LIKE ? OR prn LIKE ? OR email LIKE ? ORDER BY name LIMIT 15", (like, like, like)).fetchall()
+    return {"items": [dict(r) for r in rows]}
+
+
+class PreviewIn(BaseModel):
+    recipients: dict
+    channel: str = "email"
+    max_attempts: int = Field(3, ge=1, le=20)
+
+
+@app.post("/api/recipients/preview")
+def recipient_preview(b: PreviewIn, _=Depends(current_user)):
+    if b.channel not in ("email", "telegram", "both"):
+        raise HTTPException(422, "channel must be email, telegram or both")
+    with db() as c:
+        return services.preview_recipients(c, services.normalize_selection(b.recipients), b.channel, b.max_attempts)
 
 
 @app.post("/api/campaigns/{cid}/{action}")
@@ -359,15 +426,15 @@ def campaign_action(cid: int, action: str, _=Depends(current_user)):
         st = row["status"]
         if action in ("start", "resume"):
             if st not in ("DRAFT", "PAUSED", "COMPLETED"):
-                raise HTTPException(409, f"Campaign is already {st}")
+                raise HTTPException(409, f"This round is already {st}")
             c.execute("UPDATE campaigns SET status='RUNNING', started_at=COALESCE(started_at, datetime('now')) WHERE id=?", (cid,))
         elif action == "pause":
             if st != "RUNNING":
-                raise HTTPException(409, "Only a running campaign can be paused")
+                raise HTTPException(409, "Only a running round can be paused")
             c.execute("UPDATE campaigns SET status='PAUSED' WHERE id=?", (cid,))
         elif action == "run-now":
             if st != "RUNNING":
-                raise HTTPException(409, "Start the campaign first")
+                raise HTTPException(409, "Start the round first")
         else:
             raise HTTPException(404, "Unknown action")
     return services.run_campaign(cid) if action == "run-now" else {"ok": True}
