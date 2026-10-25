@@ -32,23 +32,7 @@ CREATE TABLE IF NOT EXISTS campaigns(
   batch_size INTEGER NOT NULL DEFAULT 20,
   deadline TEXT,
   email_subject TEXT NOT NULL, email_body TEXT NOT NULL, telegram_body TEXT NOT NULL,
-  created_at TEXT NOT NULL DEFAULT (datetime('now')), started_at TEXT,
-  recipient_selection TEXT NOT NULL DEFAULT '{"mode":"all"}');
-  CREATE TABLE IF NOT EXISTS import_batches(
-  id INTEGER PRIMARY KEY,
-  filename TEXT NOT NULL,
-  graduation_year INTEGER NOT NULL,
-  total_students INTEGER NOT NULL DEFAULT 0,
-  added INTEGER NOT NULL DEFAULT 0,
-  updated INTEGER NOT NULL DEFAULT 0,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
-CREATE TABLE IF NOT EXISTS import_batch_alumni(
-  import_batch_id INTEGER NOT NULL REFERENCES import_batches(id) ON DELETE CASCADE,
-  alumni_id INTEGER NOT NULL REFERENCES alumni(id) ON DELETE CASCADE,
-  PRIMARY KEY (import_batch_id, alumni_id)
-);
+  created_at TEXT NOT NULL DEFAULT (datetime('now')), started_at TEXT);
 CREATE TABLE IF NOT EXISTS reminder_log(
   id INTEGER PRIMARY KEY, campaign_id INTEGER, alumni_id INTEGER, channel TEXT,
   status TEXT,                                     -- SENT | SIMULATED | FAILED | SKIPPED
@@ -57,6 +41,21 @@ CREATE TABLE IF NOT EXISTS undo_actions(
   id INTEGER PRIMARY KEY, type TEXT NOT NULL, payload TEXT NOT NULL,
   label TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')));
 CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT);
+
+-- Recipient selection: import history + a saved audience per campaign.
+-- Only new tables, so an existing database upgrades itself on the next start.
+CREATE TABLE IF NOT EXISTS import_batches(
+  id INTEGER PRIMARY KEY, filename TEXT NOT NULL, graduation_year INTEGER,
+  added INTEGER NOT NULL DEFAULT 0, updated INTEGER NOT NULL DEFAULT 0, unique_students INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')));
+CREATE TABLE IF NOT EXISTS import_batch_alumni(
+  import_id INTEGER NOT NULL REFERENCES import_batches(id) ON DELETE CASCADE,
+  alumni_id INTEGER NOT NULL REFERENCES alumni(id) ON DELETE CASCADE,
+  PRIMARY KEY (import_id, alumni_id));
+CREATE INDEX IF NOT EXISTS idx_iba_alumni ON import_batch_alumni(alumni_id);
+-- No row for a campaign = legacy behaviour (everyone). config is JSON: {"all":bool,"batches":[],"import_ids":[],"alumni_ids":[]}
+CREATE TABLE IF NOT EXISTS campaign_selection(
+  campaign_id INTEGER PRIMARY KEY REFERENCES campaigns(id) ON DELETE CASCADE, config TEXT NOT NULL);
 """
 
 
@@ -82,23 +81,6 @@ def db():
 
 def init():
     import os
-
-    db_dir = os.path.dirname(config.DB_PATH)
-    if db_dir:
-        os.makedirs(db_dir, exist_ok=True)
-
+    os.makedirs(os.path.dirname(config.DB_PATH), exist_ok=True)
     with db() as c:
         c.executescript(SCHEMA)
-
-        # Migrate existing databases without deleting campaign data.
-        columns = {
-            row["name"]
-            for row in c.execute("PRAGMA table_info(campaigns)").fetchall()
-        }
-
-        if "recipient_selection" not in columns:
-            c.execute(
-                """ALTER TABLE campaigns
-                   ADD COLUMN recipient_selection TEXT NOT NULL
-                   DEFAULT '{"mode":"all"}'"""
-            )

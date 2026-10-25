@@ -1,5 +1,5 @@
-import React, { useState } from 'react'
-import { Loader2, Pause, Pencil, Play, Plus, RefreshCw, Zap } from 'lucide-react'
+import React, { useEffect, useState } from 'react'
+import { Loader2, Pause, Pencil, Play, Plus, RefreshCw, Search, Users, X, Zap } from 'lucide-react'
 import { api } from '../api'
 import { Badge, ErrorBox, PageHeader, Spinner, fmtDate, useLoad, useToast } from '../ui.jsx'
 
@@ -8,6 +8,18 @@ const BLANK = { name: '', channel: 'email', interval_hours: 72, max_attempts: 3,
   email_subject: 'Please update your career details – {{batch}} batch',
   email_body: 'Dear {{name}},\n\nThe department is collecting career information from the {{batch}} batch for accreditation reports. It takes about two minutes.\n\nYour personal link:\n{{unique_link}}\n\nThank you,\nDepartment of Computer Science (AI)',
   telegram_body: 'Hi {{name}}, please update your career details ({{batch}} batch): {{unique_link}}' }
+
+const EMPTY_SEL = { all: false, batches: [], import_ids: [], alumni_ids: [] }
+const isEmptySel = (s) => !s.all && !s.batches.length && !s.import_ids.length && !s.alumni_ids.length
+const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`
+function describeRecipients(r) {
+  if (!r || r.all) return 'Everyone'
+  const p = []
+  if (r.batches.length) p.push(`batch ${r.batches.join(', ')}`)
+  if (r.import_ids.length) p.push(plural(r.import_ids.length, 'imported file'))
+  if (r.alumni_ids.length) p.push(plural(r.alumni_ids.length, 'individual'))
+  return p.join(' + ') || 'nobody selected'
+}
 
 export default function Campaigns() {
   const toast = useToast()
@@ -46,7 +58,8 @@ export default function Campaigns() {
           <div key={c.id} className="card p-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div><div className="flex items-center gap-2"><h2 className="font-medium">{c.name}</h2><Badge tone={tone[c.status]}>{c.status}</Badge></div>
-                <p className="mt-1 text-xs text-slate-500">{c.channel} · every {c.interval_hours} h · max {c.max_attempts} attempts · batch {c.batch_size} · deadline {c.deadline || '—'}</p></div>
+                <p className="mt-1 text-xs text-slate-500">{c.channel} · every {c.interval_hours} h · max {c.max_attempts} attempts · batch {c.batch_size} · deadline {c.deadline || '—'}</p>
+                <p className="mt-0.5 flex items-center gap-1 text-xs text-slate-500"><Users className="h-3 w-3" />Recipients: {describeRecipients(c.recipients)} · {c.recipient_total ?? 0} {c.recipient_total === 1 ? 'alumnus' : 'alumni'}</p></div>
               <div className="flex flex-wrap gap-2">
                 {c.status === 'RUNNING' ? <>
                   <button className="btn-ghost" disabled={!!busyId} onClick={() => act(c, 'run-now')}>{busyId === c.id + 'run-now' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4" />}Run batch now</button>
@@ -80,18 +93,137 @@ export default function Campaigns() {
   )
 }
 
+function RecipientPicker({ sel, setSel, people, setPeople, channel, maxAttempts }) {
+  const opts = useLoad(() => api('/recipients/options'), [])
+  const [q, setQ] = useState('')
+  const [hits, setHits] = useState([])
+  const [pv, setPv] = useState(null)
+  const [pvErr, setPvErr] = useState(null)
+  const empty = isEmptySel(sel)
+  const toggle = (k, v) => setSel((s) => ({ ...s, [k]: s[k].includes(v) ? s[k].filter((x) => x !== v) : [...s[k], v] }))
+
+  useEffect(() => {   // alumni search (name, PRN or email)
+    const t = q.trim()
+    if (t.length < 2) { setHits([]); return }
+    const h = setTimeout(() => api(`/recipients/search?q=${encodeURIComponent(t)}`).then((r) => setHits(r.items)).catch(() => setHits([])), 250)
+    return () => clearTimeout(h)
+  }, [q])
+
+  useEffect(() => {   // live preview, calculated by the server from the database
+    if (empty) { setPv(null); setPvErr(null); return }
+    let live = true
+    setPv(null)
+    const h = setTimeout(() => api('/recipients/preview', { method: 'POST', body: { recipients: sel, channel, max_attempts: +maxAttempts || 3 } })
+      .then((r) => { if (live) { setPv(r); setPvErr(null) } }).catch((e) => { if (live) setPvErr(e) }), 300)
+    return () => { live = false; clearTimeout(h) }
+  }, [JSON.stringify(sel), channel, maxAttempts]) // eslint-disable-line
+
+  const add = (p) => {
+    if (!sel.alumni_ids.includes(p.id)) {
+      setSel((s) => ({ ...s, alumni_ids: [...s.alumni_ids, p.id] }))
+      setPeople((ps) => (ps.some((x) => x.id === p.id) ? ps : [...ps, { id: p.id, name: p.name, prn: p.prn }]))
+    }
+    setQ(''); setHits([])
+  }
+  const chosen = sel.alumni_ids.map((id) => people.find((p) => p.id === id) || { id, name: `Alumnus #${id}`, prn: '' })
+  const chip = (on) => `rounded-lg border px-3 py-1.5 text-sm font-medium transition ${on ? 'border-blue-800 bg-blue-800 text-white' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`
+  const via = channel === 'email' ? 'email' : channel === 'telegram' ? 'Telegram chat ID' : 'email or Telegram'
+
+  return (
+    <fieldset className="rounded-lg border border-slate-200 p-4">
+      <legend className="flex items-center gap-1.5 px-1 text-sm font-medium"><Users className="h-4 w-4" />Who should receive this campaign?</legend>
+      <p className="mb-3 text-xs text-slate-500">Only alumni in the chosen groups who are also eligible (pending, subscribed, reachable, attempts left) are contacted. Overlapping groups never send twice.</p>
+      <div className="mb-3 flex flex-wrap gap-4 text-sm">
+        <label className="flex items-center gap-2"><input type="radio" name="rmode" checked={!sel.all} onChange={() => setSel((s) => ({ ...s, all: false }))} />Choose recipients</label>
+        <label className="flex items-center gap-2"><input type="radio" name="rmode" checked={sel.all} onChange={() => setSel((s) => ({ ...s, all: true }))} />Everyone</label>
+      </div>
+
+      {!sel.all && (
+        <div className="space-y-4">
+          <div>
+            <div className="label">By graduation batch <span className="font-normal text-slate-500">(select one or more)</span></div>
+            {opts.loading && !opts.data ? <p className="text-sm text-slate-500">Loading…</p> : opts.error ? <ErrorBox error={opts.error} retry={opts.reload} /> : (
+              <div className="flex flex-wrap gap-1.5">
+                {opts.data.batches.length === 0 && <p className="text-sm text-slate-500">No alumni imported yet.</p>}
+                {opts.data.batches.map((b) => (
+                  <button type="button" key={b.year} aria-pressed={sel.batches.includes(b.year)} className={chip(sel.batches.includes(b.year))} onClick={() => toggle('batches', b.year)}>
+                    {b.year} <span className="opacity-75">· {b.total}</span></button>))}
+              </div>)}
+          </div>
+
+          <div>
+            <div className="label">By imported file</div>
+            {opts.data && (opts.data.imports.length === 0
+              ? <p className="text-sm text-slate-500">No imports recorded yet. Files imported from now on will be listed here.</p>
+              : <div className="max-h-40 space-y-1 overflow-y-auto rounded-lg border border-slate-100 p-2">
+                {opts.data.imports.map((i) => (
+                  <label key={i.id} className={`flex items-start gap-2 text-sm ${i.total === 0 ? 'opacity-50' : ''}`}>
+                    <input type="checkbox" className="mt-0.5" disabled={i.total === 0} checked={sel.import_ids.includes(i.id)} onChange={() => toggle('import_ids', i.id)} />
+                    <span className="min-w-0"><span className="break-all font-medium">{i.filename}</span>
+                      <span className="block text-xs text-slate-500">{i.total} alumni · batch {i.graduation_year ?? '—'} · imported {fmtDate(i.created_at)}</span></span>
+                  </label>))}
+              </div>)}
+          </div>
+
+          <div>
+            <label className="label" htmlFor="rsearch">Select individuals</label>
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-slate-400" />
+              <input id="rsearch" className="input pl-9" placeholder="Search by name, PRN or email (2+ characters)" value={q} onChange={(e) => setQ(e.target.value)} autoComplete="off" />
+            </div>
+            {hits.length > 0 && (
+              <ul className="mt-1 max-h-44 divide-y divide-slate-100 overflow-y-auto rounded-lg border border-slate-200 bg-white text-sm">
+                {hits.map((p) => (
+                  <li key={p.id}><button type="button" className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left hover:bg-blue-50 disabled:opacity-50"
+                    disabled={sel.alumni_ids.includes(p.id)} onClick={() => add(p)}>
+                    <span className="min-w-0 truncate">{p.name} <span className="font-mono text-xs text-slate-500">{p.prn}</span></span>
+                    <span className="shrink-0 text-xs text-slate-500">{sel.alumni_ids.includes(p.id) ? 'added' : `batch ${p.graduation_year}`}</span></button></li>))}
+              </ul>)}
+            {q.trim().length >= 2 && hits.length === 0 && <p className="mt-1 text-xs text-slate-500">No match.</p>}
+            {chosen.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {chosen.map((p) => (
+                  <span key={p.id} className="inline-flex items-center gap-1 rounded-full bg-slate-100 py-1 pl-3 pr-1 text-xs">
+                    {p.name}{p.prn && <span className="font-mono text-slate-500">{p.prn}</span>}
+                    <button type="button" aria-label={`Remove ${p.name}`} className="rounded-full p-0.5 hover:bg-slate-200" onClick={() => toggle('alumni_ids', p.id)}><X className="h-3 w-3" /></button></span>))}
+              </div>)}
+          </div>
+        </div>)}
+
+      <div className="mt-4 rounded-lg bg-slate-50 p-3 text-sm" aria-live="polite">
+        <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Recipient preview</div>
+        {empty ? <p className="mt-1 text-slate-600">Select at least one batch, file or individual, or choose Everyone.</p>
+          : pvErr ? <div className="mt-1"><ErrorBox error={pvErr} /></div>
+          : !pv ? <p className="mt-1 flex items-center gap-2 text-slate-500"><Loader2 className="h-4 w-4 animate-spin" />Calculating…</p>
+          : <>
+            <p className="mt-1 text-lg font-semibold tabular-nums">{pv.selected} {pv.selected === 1 ? 'alumnus' : 'alumni'} selected</p>
+            <p className="text-slate-600"><strong className="tabular-nums">{pv.eligible}</strong> eligible · {pv.completed} already completed · {pv.unsubscribed} unsubscribed
+              {pv.no_contact > 0 && ` · ${pv.no_contact} with no usable ${via}`}{pv.attempts_used > 0 && ` · ${pv.attempts_used} reached max attempts`}</p>
+          </>}
+      </div>
+    </fieldset>
+  )
+}
+
 function Editor({ initial, placeholders, onClose, onSaved }) {
   const toast = useToast()
   const [f, setF] = useState(initial)
   const [err, setErr] = useState(null)
   const [busy, setBusy] = useState(false)
+  const [sel, setSel] = useState(() => {
+    const r = initial.recipients
+    return r ? { all: !!r.all, batches: r.batches || [], import_ids: r.import_ids || [], alumni_ids: r.alumni_ids || [] } : { ...EMPTY_SEL }
+  })
+  const [people, setPeople] = useState(initial.recipients?.people || [])
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value })
   const sample = { name: 'Aarav Sharma', batch: '2026', unique_link: 'https://…/update?token=…', prn: '12210000', employer: 'Acme' }
   const preview = (t) => t.replace(/\{\{\s*(\w+)\s*\}\}/g, (m, k) => sample[k] ?? m)
   async function save(e) {
-    e.preventDefault(); setBusy(true); setErr(null)
-    const body = { ...f, interval_hours: +f.interval_hours, max_attempts: +f.max_attempts, batch_size: +f.batch_size, deadline: f.deadline || null }
-    ;['id', 'status', 'created_at', 'started_at', 'sent', 'failed', 'eligible_now', 'reachable'].forEach((k) => delete body[k])
+    e.preventDefault(); setErr(null)
+    if (isEmptySel(sel)) { setErr('Choose who receives this campaign: a graduation batch, an imported file, individual alumni, or Everyone.'); return }
+    setBusy(true)
+    const body = { ...f, interval_hours: +f.interval_hours, max_attempts: +f.max_attempts, batch_size: +f.batch_size, deadline: f.deadline || null, recipients: sel }
+    ;['id', 'status', 'created_at', 'started_at', 'sent', 'failed', 'eligible_now', 'reachable', 'recipient_total'].forEach((k) => delete body[k])
     try { await api(f.id ? `/campaigns/${f.id}` : '/campaigns', { method: f.id ? 'PUT' : 'POST', body }); toast('Campaign saved'); onSaved() }
     catch (x) { setErr(x) } finally { setBusy(false) }
   }
@@ -110,6 +242,7 @@ function Editor({ initial, placeholders, onClose, onSaved }) {
         </div>
         <div><label className="label" htmlFor="dl">Submission deadline <span className="font-normal text-slate-500">(pending after this date count as overdue; blank = 14 days from now)</span></label>
           <input id="dl" type="date" className="input sm:w-48" value={f.deadline} onChange={set('deadline')} /></div>
+        <RecipientPicker sel={sel} setSel={setSel} people={people} setPeople={setPeople} channel={f.channel} maxAttempts={f.max_attempts} />
         <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-500">Placeholders: {chips}</div>
         {f.channel !== 'telegram' && <>
           <div><label className="label" htmlFor="es">Email subject</label><input id="es" className="input" value={f.email_subject} onChange={set('email_subject')} /></div>
