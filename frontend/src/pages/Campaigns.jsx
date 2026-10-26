@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { Loader2, Pause, Pencil, Play, Plus, RefreshCw, Search, Users, X, Zap } from 'lucide-react'
 import { api } from '../api'
-import { Badge, ErrorBox, PageHeader, Spinner, fmtDate, useLoad, useToast } from '../ui.jsx'
+import { Badge, CATEGORIES, ErrorBox, PageHeader, Spinner, fmtDate, useLoad, useToast } from '../ui.jsx'
 
 const tone = { RUNNING: 'green', PAUSED: 'amber', DRAFT: 'slate', COMPLETED: 'blue' }
 const BLANK = {
@@ -166,7 +166,7 @@ function RecipientPicker({ sel, setSel, people, setPeople, channel, maxAttempts 
                     <label key={i.id} className={`flex items-start gap-2 text-sm ${i.total === 0 ? 'opacity-50' : ''}`}>
                       <input type="checkbox" className="mt-0.5" disabled={i.total === 0} checked={sel.import_ids.includes(i.id)} onChange={() => toggle('import_ids', i.id)} />
                       <span className="min-w-0"><span className="break-all font-medium">{i.filename}</span>
-                        <span className="block text-xs text-slate-500">{i.total} alumni · batch {i.graduation_year ?? '—'} · imported {fmtDate(i.created_at)}</span></span>
+                        <span className="block text-xs text-slate-500">{CATEGORIES[i.category]?.label ?? 'Placement'} · {i.total} alumni · batch {i.graduation_year ?? '—'} · imported {fmtDate(i.created_at)}</span></span>
                     </label>))}
                 </div>)}
             </div>

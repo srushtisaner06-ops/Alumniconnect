@@ -91,4 +91,16 @@ export function useLoad(fn, deps = []) {
 }
 
 export const fmtDate = (s) => (s ? new Date(s.replace(' ', 'T') + (s.includes('T') ? '' : 'Z')).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' }) : '—')
-export const CAREER = { EMPLOYMENT: 'Employment', HIGHER_STUDIES: 'Higher studies', ENTREPRENEURSHIP: 'Entrepreneurship' }
+export const CAREER = { EMPLOYMENT: 'Placement', HIGHER_STUDIES: 'Higher studies', ENTREPRENEURSHIP: 'Entrepreneurship' }
+
+// The three record categories (placement, higher studies, entrepreneurship) used across the app.
+export const CATEGORIES = {
+  PLACEMENT: { label: 'Placement', tone: 'indigo', table: 'Table 4.6.1' },
+  HIGHER_STUDIES: { label: 'Higher studies', tone: 'blue', table: 'Table 4.6.2' },
+  ENTREPRENEURSHIP: { label: 'Entrepreneurship', tone: 'green', table: 'Table 4.6.3' },
+}
+export const CATEGORY_KEYS = Object.keys(CATEGORIES)
+
+export const CategoryBadges = ({ categories = [] }) => categories.length === 0 ? <span className="text-slate-400">—</span> : (
+  <span className="flex flex-wrap gap-1">{categories.map((c) => <Badge key={c} tone={CATEGORIES[c]?.tone}>{CATEGORIES[c]?.label || c}</Badge>)}</span>
+)

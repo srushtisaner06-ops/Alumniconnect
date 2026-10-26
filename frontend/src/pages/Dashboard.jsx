@@ -1,6 +1,6 @@
 import React from 'react'
 import { Link } from 'react-router-dom'
-import { CheckCircle2, Clock, Percent, Users, AlertTriangle, ArrowRight } from 'lucide-react'
+import { CheckCircle2, Clock, Percent, Users, AlertTriangle, ArrowRight, Briefcase, GraduationCap, Rocket } from 'lucide-react'
 import { api } from '../api'
 import { Badge, ErrorBox, PageHeader, Progress, Spinner, Stat, useLoad } from '../ui.jsx'
 
@@ -8,7 +8,7 @@ export default function Dashboard() {
   const { data, error, loading, reload } = useLoad(() => api('/dashboard'))
   if (loading) return <Spinner />
   if (error) return <ErrorBox error={error} retry={reload} />
-  const s = data.summary, p = data.placement
+  const s = data.summary, p = data.placement, pr = data.progression
   return (
     <>
       <PageHeader title="Overview" sub="Alumni data collection progress" />
@@ -22,6 +22,22 @@ export default function Dashboard() {
         <div className="mb-2 flex justify-between text-sm"><span className="font-medium">Submission progress</span><span className="text-slate-500">{s.completed} of {s.total}</span></div>
         <Progress value={s.completion_pct} />
         {s.total === 0 && <p className="mt-3 text-sm text-slate-500">No alumni yet. <Link className="text-indigo-600 underline" to="/dashboard/alumni/import">Import a placement sheet</Link>.</p>}
+      </div>
+
+      <div className="mt-4">
+        <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+          <h2 className="font-medium">Student outcomes</h2>
+          <Link to="/dashboard/alumni/import" className="inline-flex items-center gap-1 text-sm text-indigo-600">Import records <ArrowRight className="h-3 w-3" /></Link>
+        </div>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <Stat icon={Briefcase} label="Placement" value={pr.placed} sub="Table 4.6.1" />
+          <Stat icon={GraduationCap} label="Higher studies" value={pr.higher_studies} tone="blue" sub="Table 4.6.2" />
+          <Stat icon={Rocket} label="Entrepreneurship" value={pr.entrepreneurship} tone="green" sub="Table 4.6.3" />
+        </div>
+        <p className="mt-2 text-xs text-slate-500">
+          {pr.total} student{pr.total === 1 ? '' : 's'} counted once across the three categories
+          {pr.index != null ? ` · placement index (X+Y+Z)/FS = ${pr.total}/${pr.final_year_students} = ${pr.index}%` : ' · import the placement sheet (with its Summary tab) to compute the placement index'}.
+        </p>
       </div>
 
       <div className="mt-4 grid gap-4 lg:grid-cols-2">

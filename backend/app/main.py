@@ -103,20 +103,31 @@ def reports(_=Depends(current_user)):
         return services.analytics(c)
 
 
+EXPORT_SCOPES = {"submissions": None, "placement": importer.PLACEMENT,
+                 "higher_studies": importer.HIGHER_STUDIES, "entrepreneurship": importer.ENTREPRENEURSHIP}
+
+
 @app.get("/api/reports/export")
 def export(scope: str = "submissions", format: str = "xlsx", _=Depends(current_user)):
-    if scope not in ("submissions", "placement") or format not in ("csv", "xlsx"):
-        raise HTTPException(422, "scope must be submissions|placement, format csv|xlsx")
+    if scope not in EXPORT_SCOPES or format not in ("csv", "xlsx"):
+        raise HTTPException(422, "scope must be submissions|placement|higher_studies|entrepreneurship, format csv|xlsx")
+    category = EXPORT_SCOPES[scope]
     with db() as c:
         meta = [dict(r) for r in c.execute("SELECT id,prn,graduation_year,status FROM alumni")]
         order = engine.sort_ids(meta, "graduation_year")
         rows = []
         for aid in order:
             a = services.alumnus_dict(c, c.execute("SELECT * FROM alumni WHERE id=?", (aid,)).fetchone())
-            if scope == "placement":
+            base = [a["sr_no"], a["name"], a["prn"], a["class_div"], a["phone"], a["email"]]
+            if category == importer.PLACEMENT:
                 for o in a["offers"]:
-                    rows.append([a["sr_no"], a["name"], a["prn"], a["class_div"], a["phone"], a["email"], o["employer"],
-                                 o["package_lpa"], o["position"], o["letter_ref"], o["letter_link"]])
+                    rows.append(base + [o["employer"], o["package_lpa"], o["position"], o["letter_ref"], o["letter_link"]])
+            elif category == importer.HIGHER_STUDIES:
+                for h in a["higher_studies"]:
+                    rows.append(base + [h["degree"], h["institution"], h["letter_link"]])
+            elif category == importer.ENTREPRENEURSHIP:
+                for v in a["ventures"]:
+                    rows.append(base + [v["company"], v["registration_no"], v["website"], v["letter_link"]])
             else:
                 d = a["details"] or {}
                 rows.append([a["name"], a["prn"], a["graduation_year"], a["email"], a["phone"], a["status"],
@@ -125,8 +136,8 @@ def export(scope: str = "submissions", format: str = "xlsx", _=Depends(current_u
                              d.get("designation") or d.get("degree") or d.get("business_domain") or "",
                              d.get("industry") or d.get("country") or d.get("stage") or "",
                              d.get("specialization") or d.get("notes") or ""])
-    if scope == "placement":
-        head = [h for _, h, _ in importer.COLUMNS]
+    if category:
+        head = importer.headers(category)      # same headers as the reference sheet, so the export re-imports as-is
     else:
         head = ["Name", "PRN", "Graduation Year", "Email", "Phone", "Status", "Career Status", "Submitted At", "Reminders Sent",
                 "Company / University / Startup", "Designation / Degree / Domain", "Industry / Country / Stage", "Specialization / Notes"]
@@ -151,19 +162,25 @@ def export(scope: str = "submissions", format: str = "xlsx", _=Depends(current_u
 
 # ================================================================ alumni
 @app.get("/api/alumni")
-def list_alumni(search: str = "", status: str = "all", page: int = 1, page_size: int = Query(25, le=100), _=Depends(current_user)):
+def list_alumni(search: str = "", status: str = "all", category: str = "all", page: int = 1, page_size: int = Query(25, le=100), _=Depends(current_user)):
     q = search.strip()
     where, args = [], []
+    if category != "all" and category not in services.CATEGORY_TABLES:
+        raise HTTPException(422, "category must be all|PLACEMENT|HIGHER_STUDIES|ENTREPRENEURSHIP")
     with db() as c:
-        if re.fullmatch(r"\d{12}", q):          # PRN lookup
+        if importer.PRN_RE.fullmatch(q):         # PRN lookup
             recs = [dict(r) for r in c.execute("SELECT id,prn FROM alumni")]
             hit = engine.search_prn(recs, q)
             where.append("a.id=?")
             args.append(hit if hit is not None else -1)
         elif q:
             like = f"%{q}%"
-            where.append("(a.name LIKE ? OR a.prn LIKE ? OR a.email LIKE ? OR a.id IN (SELECT alumni_id FROM offers WHERE employer LIKE ?))")
-            args += [like] * 4
+            where.append("(a.name LIKE ? OR a.prn LIKE ? OR a.email LIKE ? OR a.id IN (SELECT alumni_id FROM offers WHERE employer LIKE ?)"
+                         " OR a.id IN (SELECT alumni_id FROM higher_studies WHERE institution LIKE ? OR degree LIKE ?)"
+                         " OR a.id IN (SELECT alumni_id FROM ventures WHERE company LIKE ?))")
+            args += [like] * 7
+        if category != "all":
+            where.append(f"EXISTS (SELECT 1 FROM {services.CATEGORY_TABLES[category]} t WHERE t.alumni_id=a.id)")
         cutoff = services.overdue_cutoff(c)
         today = services.now().strftime("%Y-%m-%d")
         is_overdue = bool(cutoff and cutoff < today)
@@ -182,7 +199,10 @@ def list_alumni(search: str = "", status: str = "all", page: int = 1, page_size:
             d = services.alumnus_dict(c, r)
             d.pop("token")
             items.append(d)
-    return {"items": items, "total": total, "page": page, "page_size": page_size}
+        counts = {"all": c.execute("SELECT COUNT(*) n FROM alumni").fetchone()["n"]}
+        for cat, table in services.CATEGORY_TABLES.items():
+            counts[cat] = c.execute(f"SELECT COUNT(DISTINCT alumni_id) n FROM {table}").fetchone()["n"]
+    return {"items": items, "total": total, "page": page, "page_size": page_size, "category_counts": counts}
 
 
 @app.get("/api/alumni/{aid}")
@@ -246,11 +266,21 @@ def undo(_=Depends(current_user)):
 
 
 # ================================================================ import
+@app.get("/api/import/formats")
+def import_formats(_=Depends(current_user)):
+    """The three record types and their exact column headers (shown on the Import page)."""
+    return {"formats": importer.formats()}
+
+
 @app.get("/api/import/template")
-def import_template(_=Depends(current_user)):
-    return Response(importer.template_workbook(),
+def import_template(category: str = importer.PLACEMENT, _=Depends(current_user)):
+    if category not in importer.CATEGORIES:
+        raise HTTPException(422, "category must be PLACEMENT|HIGHER_STUDIES|ENTREPRENEURSHIP")
+    fname = {importer.PLACEMENT: "placement", importer.HIGHER_STUDIES: "higher_studies",
+             importer.ENTREPRENEURSHIP: "entrepreneurship"}[category]
+    return Response(importer.template_workbook(category),
                     media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    headers={"Content-Disposition": 'attachment; filename="placement_template.xlsx"'})
+                    headers={"Content-Disposition": f'attachment; filename="{fname}_template.xlsx"'})
 
 
 MAX_UPLOAD = 5 * 1024 * 1024
@@ -268,8 +298,9 @@ def _public_report(rep):
 
 
 @app.post("/api/import/validate")
-async def import_validate(file: UploadFile = File(...), graduation_year: Optional[int] = Form(None), _=Depends(current_user)):
-    rep = importer.parse(file.filename, await _read_upload(file), graduation_year)
+async def import_validate(file: UploadFile = File(...), graduation_year: Optional[int] = Form(None),
+                          category: Optional[str] = Form(None), _=Depends(current_user)):
+    rep = importer.parse(file.filename, await _read_upload(file), graduation_year, category or None)
     with db() as c:
         existing = {r["prn"] for r in c.execute("SELECT prn FROM alumni")}
     rep["already_in_database"] = sum(1 for s in rep["students"] if s["prn"] in existing)
@@ -278,23 +309,26 @@ async def import_validate(file: UploadFile = File(...), graduation_year: Optiona
 
 @app.post("/api/import")
 async def import_commit(file: UploadFile = File(...), graduation_year: Optional[int] = Form(None),
+                        category: Optional[str] = Form(None),
                         replace: bool = Form(False), skip_invalid: bool = Form(False), _=Depends(current_user)):
-    rep = importer.parse(file.filename, await _read_upload(file), graduation_year)
-    fatal = rep["missing_columns"] or not rep["graduation_year"] or not rep["students"] or rep["header_row"] is None
+    rep = importer.parse(file.filename, await _read_upload(file), graduation_year, category or None)
+    fatal = rep["missing_columns"] or not rep["graduation_year"] or not rep["students"] or rep["header_row"] is None \
+        or not rep["category"]
     if fatal or (rep["errors"] and not skip_invalid):
         raise HTTPException(422, {"message": "File does not match the reference format", "report": _public_report(rep)})
     with db() as c:
         if replace:
             c.execute("DELETE FROM import_batches")   # their alumni are wiped below, so the file history goes too
-        imp = c.execute("INSERT INTO import_batches(filename,graduation_year) VALUES(?,?)",
-                        ((file.filename or "upload")[:200], rep["graduation_year"])).lastrowid
+        imp = c.execute("INSERT INTO import_batches(filename,graduation_year,category) VALUES(?,?,?)",
+                        ((file.filename or "upload")[:200], rep["graduation_year"], rep["category"])).lastrowid
         res = services.import_students(c, rep["students"], rep["graduation_year"], replace=replace,
                                        final_year_students=rep["final_year_students"], import_id=imp)
         c.execute("UPDATE import_batches SET added=?, updated=?, unique_students=? WHERE id=?",
                   (res["added"], res["updated"], len(rep["students"]), imp))
     res["import_id"] = imp
     res["skipped_rows"] = len({e["row"] for e in rep["errors"] if e["row"]})
-    return {"ok": True, **res, "unique_students": len(rep["students"]), "replaced": replace}
+    return {"ok": True, **res, "unique_students": len(rep["students"]), "replaced": replace,
+            "category": rep["category"], "category_label": rep["category_label"]}
 
 
 # ================================================================ campaigns
@@ -462,9 +496,18 @@ def public_form(token: str):
     with db() as c:
         r = _by_token(c, token)
         best = c.execute("SELECT employer,position,package_lpa FROM offers WHERE alumni_id=? ORDER BY package_lpa DESC LIMIT 1", (r["id"],)).fetchone()
+        hs = c.execute("SELECT degree,institution FROM higher_studies WHERE alumni_id=? ORDER BY id DESC LIMIT 1", (r["id"],)).fetchone()
+        ent = c.execute("SELECT company FROM ventures WHERE alumni_id=? ORDER BY id DESC LIMIT 1", (r["id"],)).fetchone()
+        prefill = None
+        if best:
+            prefill = {"kind": "EMPLOYMENT", "source": "placement", "company": best["employer"], "designation": best["position"]}
+        elif hs:
+            prefill = {"kind": "HIGHER_STUDIES", "source": "higher studies", "university": hs["institution"], "degree": hs["degree"]}
+        elif ent:
+            prefill = {"kind": "ENTREPRENEURSHIP", "source": "entrepreneurship", "startup_name": ent["company"]}
         return {"name": r["name"], "graduation_year": r["graduation_year"], "prn": r["prn"], "status": r["status"],
                 "career_status": r["career_status"], "details": json.loads(r["details"]) if r["details"] else None,
-                "prefill": {"company": best["employer"], "designation": best["position"]} if best else None}
+                "prefill": prefill}
 
 
 class Submission(BaseModel):
@@ -483,7 +526,7 @@ STAGES = ["Idea", "Prototype / MVP", "Early revenue", "Growth"]
 @app.post("/api/public/submit")
 def public_submit(b: Submission):
     if b.career_status not in REQUIRED:
-        raise HTTPException(422, "Choose Employment, Higher Studies or Entrepreneurship")
+        raise HTTPException(422, "Choose Placement, Higher Studies or Entrepreneurship")
     clean = {}
     for k in REQUIRED[b.career_status]:
         v = str(b.details.get(k, "")).strip()

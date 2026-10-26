@@ -5,7 +5,7 @@ import { api } from '../api'
 import { ErrorBox, Spinner } from '../ui.jsx'
 
 const OPTIONS = [
-  { v: 'EMPLOYMENT', label: 'Employment', icon: Briefcase },
+  { v: 'EMPLOYMENT', label: 'Placement / Job', icon: Briefcase },
   { v: 'HIGHER_STUDIES', label: 'Higher studies', icon: GraduationCap },
   { v: 'ENTREPRENEURSHIP', label: 'Entrepreneurship', icon: Rocket },
 ]
@@ -29,7 +29,10 @@ export default function UpdateForm() {
     api(`/public/form?token=${encodeURIComponent(token)}`, { auth: false }).then((r) => {
       setInfo(r)
       if (r.career_status) { setKind(r.career_status); setD(r.details || {}) }
-      else if (r.prefill?.company) { setKind('EMPLOYMENT'); setD({ company: r.prefill.company, designation: r.prefill.designation || '' }) }
+      else if (r.prefill) {   // pre-fill from the placement / higher-studies / entrepreneurship record the department holds
+        const { kind: k, source, ...rest } = r.prefill
+        setKind(k); setD(Object.fromEntries(Object.entries(rest).filter(([, v]) => v)))
+      }
     }).catch(setErr)
   }, [token])
 
@@ -47,7 +50,7 @@ export default function UpdateForm() {
         <h1 className="text-xl font-semibold">Hello, {info.name.split(' ')[0]}</h1>
         <p className="mt-1 text-sm text-slate-500">Batch of {info.graduation_year} · PRN {info.prn}</p>
         {info.status === 'COMPLETED' && <p className="mt-4 rounded-lg bg-emerald-50 p-3 text-sm text-emerald-800">You have already submitted. You can review and update your answers below.</p>}
-        {info.prefill?.company && info.status !== 'COMPLETED' && <p className="mt-4 rounded-lg bg-indigo-50 p-3 text-sm text-indigo-800">We pre-filled your employer from the placement record. Please confirm or correct it.</p>}
+        {info.prefill && info.status !== 'COMPLETED' && <p className="mt-4 rounded-lg bg-indigo-50 p-3 text-sm text-indigo-800">We pre-filled some details from your {info.prefill.source} record. Please confirm or correct them.</p>}
         <form onSubmit={submit} className="mt-5 space-y-5">
           <ErrorBox error={err} />
           <fieldset><legend className="label">What are you doing now?</legend>

@@ -25,6 +25,9 @@ def overdue_cutoff(c):
     return r["d"]
 
 
+CATEGORY_TABLES = {"PLACEMENT": "offers", "HIGHER_STUDIES": "higher_studies", "ENTREPRENEURSHIP": "ventures"}
+
+
 def alumnus_dict(c, row, with_offers=True):
     d = dict(row)
     d["details"] = json.loads(d["details"]) if d.get("details") else None
@@ -33,14 +36,19 @@ def alumnus_dict(c, row, with_offers=True):
     if with_offers:
         d["offers"] = [dict(o) for o in c.execute("SELECT * FROM offers WHERE alumni_id=? ORDER BY package_lpa DESC", (d["id"],))]
         d["best_package"] = max([o["package_lpa"] or 0 for o in d["offers"]], default=0)
+        d["higher_studies"] = [dict(h) for h in c.execute("SELECT * FROM higher_studies WHERE alumni_id=? ORDER BY id", (d["id"],))]
+        d["ventures"] = [dict(v) for v in c.execute("SELECT * FROM ventures WHERE alumni_id=? ORDER BY id", (d["id"],))]
+        # Which of the three record categories this alumnus appears in (placement / higher studies / entrepreneurship)
+        d["categories"] = [cat for cat, key in (("PLACEMENT", "offers"), ("HIGHER_STUDIES", "higher_studies"),
+                                                ("ENTREPRENEURSHIP", "ventures")) if d[key]]
     return d
 
 
 def import_students(c, students, graduation_year, replace=False, final_year_students=None, import_id=None):
     if replace:
-        for t in ("reminder_log", "undo_actions", "offers", "alumni"):
+        for t in ("reminder_log", "undo_actions", "offers", "higher_studies", "ventures", "alumni"):
             c.execute(f"DELETE FROM {t}")
-    added = updated = offers_added = 0
+    added = updated = offers_added = hs_added = ventures_added = 0
     for s in students:
         row = c.execute("SELECT id FROM alumni WHERE prn=?", (s["prn"],)).fetchone()
         tg = s.get("telegram_chat_id")  # optional import column; blank never erases a chat already linked
@@ -58,7 +66,7 @@ def import_students(c, students, graduation_year, replace=False, final_year_stud
             c.execute("INSERT OR IGNORE INTO import_batch_alumni(import_id,alumni_id) VALUES(?,?)", (import_id, aid))
         have = {(o["employer"].lower(), o["package_lpa"], (o["position"] or "").lower())
                 for o in c.execute("SELECT employer,package_lpa,position FROM offers WHERE alumni_id=?", (aid,))}
-        for o in s["offers"]:
+        for o in s.get("offers", []):
             key = (o["employer"].lower(), o["package_lpa"], (o["position"] or "").lower())
             if key in have:
                 continue
@@ -66,10 +74,31 @@ def import_students(c, students, graduation_year, replace=False, final_year_stud
             c.execute("INSERT INTO offers(alumni_id,employer,package_lpa,position,letter_ref,letter_link) VALUES(?,?,?,?,?,?)",
                       (aid, o["employer"], o["package_lpa"], o["position"], o["letter_ref"], o["letter_link"]))
             offers_added += 1
+        have_hs = {((h["degree"] or "").lower(), (h["institution"] or "").lower())
+                   for h in c.execute("SELECT degree,institution FROM higher_studies WHERE alumni_id=?", (aid,))}
+        for h in s.get("higher_studies", []):
+            key = (h["degree"].lower(), h["institution"].lower())
+            if key in have_hs:
+                continue
+            have_hs.add(key)
+            c.execute("INSERT INTO higher_studies(alumni_id,degree,institution,letter_link) VALUES(?,?,?,?)",
+                      (aid, h["degree"], h["institution"], h["letter_link"]))
+            hs_added += 1
+        have_v = {((v["company"] or "").lower(), (v["registration_no"] or "").lower())
+                  for v in c.execute("SELECT company,registration_no FROM ventures WHERE alumni_id=?", (aid,))}
+        for v in s.get("ventures", []):
+            key = (v["company"].lower(), v["registration_no"].lower())
+            if key in have_v:
+                continue
+            have_v.add(key)
+            c.execute("INSERT INTO ventures(alumni_id,company,registration_no,website,letter_link) VALUES(?,?,?,?,?)",
+                      (aid, v["company"], v["registration_no"], v["website"], v["letter_link"]))
+            ventures_added += 1
     if final_year_students:
         c.execute("INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
                   (f"final_year_students:{graduation_year}", str(final_year_students)))
-    return {"added": added, "updated": updated, "offers_added": offers_added}
+    return {"added": added, "updated": updated, "offers_added": offers_added,
+            "higher_studies_added": hs_added, "ventures_added": ventures_added}
 
 
 def push_undo(c, type_, payload, label):
@@ -78,16 +107,20 @@ def push_undo(c, type_, payload, label):
 
 def snapshot(c, aid):
     a = c.execute("SELECT * FROM alumni WHERE id=?", (aid,)).fetchone()
-    return {"alumni": dict(a), "offers": [dict(o) for o in c.execute("SELECT * FROM offers WHERE alumni_id=?", (aid,))]}
+    snap = {"alumni": dict(a)}
+    for table in CATEGORY_TABLES.values():
+        snap[table] = [dict(o) for o in c.execute(f"SELECT * FROM {table} WHERE alumni_id=?", (aid,))]
+    return snap
 
 
 def restore(c, snap):
     a = snap["alumni"]
     cols = list(a.keys())
     c.execute(f"INSERT INTO alumni({','.join(cols)}) VALUES({','.join('?' * len(cols))})", [a[k] for k in cols])
-    for o in snap["offers"]:
-        oc = list(o.keys())
-        c.execute(f"INSERT INTO offers({','.join(oc)}) VALUES({','.join('?' * len(oc))})", [o[k] for k in oc])
+    for table in CATEGORY_TABLES.values():          # older undo entries only hold "offers"
+        for o in snap.get(table, []):
+            oc = list(o.keys())
+            c.execute(f"INSERT INTO {table}({','.join(oc)}) VALUES({','.join('?' * len(oc))})", [o[k] for k in oc])
 
 
 def undo_last(c):
@@ -203,7 +236,7 @@ def recipient_options(c):
     batches = [dict(r) for r in c.execute(
         "SELECT graduation_year year, COUNT(*) total FROM alumni GROUP BY graduation_year ORDER BY graduation_year DESC")]
     imports = [dict(r) for r in c.execute(
-        """SELECT b.id, b.filename, b.graduation_year, b.created_at, COUNT(m.alumni_id) total
+        """SELECT b.id, b.filename, b.graduation_year, b.category, b.created_at, COUNT(m.alumni_id) total
            FROM import_batches b LEFT JOIN import_batch_alumni m ON m.import_id=b.id GROUP BY b.id ORDER BY b.id DESC""")]
     return {"batches": batches, "imports": imports}
 
@@ -224,6 +257,13 @@ def _channels(camp, a):
     return out
 
 
+def _other_org(c, aid):
+    """Organisation to show in {{employer}} for alumni with no placement: their university or their company."""
+    r = c.execute("SELECT institution o FROM higher_studies WHERE alumni_id=? ORDER BY id LIMIT 1", (aid,)).fetchone() \
+        or c.execute("SELECT company o FROM ventures WHERE alumni_id=? ORDER BY id LIMIT 1", (aid,)).fetchone()
+    return r["o"] if r else ""
+
+
 def eligible(c, camp):
     t = now()
     out = []
@@ -239,7 +279,7 @@ def eligible(c, camp):
         offers = c.execute("SELECT * FROM offers WHERE alumni_id=? ORDER BY package_lpa DESC", (a["id"],)).fetchall()
         d = dict(a)
         d["priority"] = _priority(a, offers)
-        d["employer"] = offers[0]["employer"] if offers else ""
+        d["employer"] = offers[0]["employer"] if offers else _other_org(c, a["id"])
         out.append(d)
     return out
 
@@ -414,4 +454,36 @@ def analytics(c):
         "final_year_students": fs,
         "placement_index": round(100 * placed / fs, 2) if fs else None,
         "top_employers": employers, "package_bands": band_counts}
-    return {"summary": s, "by_batch": by_batch, "career": career, "placement": placement}
+
+    # ---- higher studies (Table 4.6.2) and entrepreneurship (Table 4.6.3)
+    hs_students = c.execute("SELECT COUNT(DISTINCT alumni_id) n FROM higher_studies").fetchone()["n"]
+    higher = {
+        "students": hs_students,
+        "records": c.execute("SELECT COUNT(*) n FROM higher_studies").fetchone()["n"],
+        "top_institutions": [dict(r) for r in c.execute(
+            "SELECT institution, COUNT(DISTINCT alumni_id) students FROM higher_studies GROUP BY institution ORDER BY students DESC, institution LIMIT 8")],
+        "degrees": [dict(r) for r in c.execute(
+            "SELECT degree, COUNT(DISTINCT alumni_id) students FROM higher_studies GROUP BY degree ORDER BY students DESC, degree LIMIT 8")]}
+    ent_students = c.execute("SELECT COUNT(DISTINCT alumni_id) n FROM ventures").fetchone()["n"]
+    entrepreneurship = {
+        "students": ent_students,
+        "ventures": c.execute("SELECT COUNT(*) n FROM ventures").fetchone()["n"],
+        "companies": [dict(r) for r in c.execute(
+            """SELECT v.company, v.registration_no, v.website, a.name founder FROM ventures v JOIN alumni a ON a.id=v.alumni_id
+               ORDER BY v.id DESC LIMIT 8""")]}
+
+    # Placement index exactly as the sheet's Summary tab defines it: (X + Y + Z) / FS, where X, Y, Z count
+    # students placed / in higher studies / in entrepreneurship. A student in two categories counts once.
+    any_rec = c.execute("""SELECT a.graduation_year y, COUNT(*) n FROM alumni a WHERE
+        EXISTS(SELECT 1 FROM offers WHERE alumni_id=a.id) OR EXISTS(SELECT 1 FROM higher_studies WHERE alumni_id=a.id)
+        OR EXISTS(SELECT 1 FROM ventures WHERE alumni_id=a.id) GROUP BY a.graduation_year ORDER BY a.graduation_year DESC""").fetchall()
+    total_unique = sum(r["n"] for r in any_rec)
+    fs_all = None
+    if any_rec:
+        v = c.execute("SELECT value FROM settings WHERE key=?", (f"final_year_students:{any_rec[0]['y']}",)).fetchone()
+        fs_all = int(v["value"]) if v else None
+    progression = {"final_year_students": fs_all, "placed": placed, "higher_studies": hs_students,
+                   "entrepreneurship": ent_students, "total": total_unique,
+                   "index": round(100 * total_unique / fs_all, 2) if fs_all else None}
+    return {"summary": s, "by_batch": by_batch, "career": career, "placement": placement,
+            "higher_studies": higher, "entrepreneurship": entrepreneurship, "progression": progression}

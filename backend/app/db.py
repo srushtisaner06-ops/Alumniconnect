@@ -23,6 +23,16 @@ CREATE INDEX IF NOT EXISTS idx_alumni_status ON alumni(status);
 CREATE TABLE IF NOT EXISTS offers(
   id INTEGER PRIMARY KEY, alumni_id INTEGER NOT NULL REFERENCES alumni(id) ON DELETE CASCADE,
   employer TEXT, package_lpa REAL, position TEXT, letter_ref TEXT, letter_link TEXT);
+-- Higher-studies (Table 4.6.2) and entrepreneurship (Table 4.6.3) records. An alumnus can have records in
+-- any of the three categories (offers = placement), so they are separate tables keyed by alumni_id.
+CREATE TABLE IF NOT EXISTS higher_studies(
+  id INTEGER PRIMARY KEY, alumni_id INTEGER NOT NULL REFERENCES alumni(id) ON DELETE CASCADE,
+  degree TEXT, institution TEXT, letter_link TEXT);
+CREATE INDEX IF NOT EXISTS idx_hs_alumni ON higher_studies(alumni_id);
+CREATE TABLE IF NOT EXISTS ventures(
+  id INTEGER PRIMARY KEY, alumni_id INTEGER NOT NULL REFERENCES alumni(id) ON DELETE CASCADE,
+  company TEXT, registration_no TEXT, website TEXT, letter_link TEXT);
+CREATE INDEX IF NOT EXISTS idx_ventures_alumni ON ventures(alumni_id);
 CREATE TABLE IF NOT EXISTS campaigns(
   id INTEGER PRIMARY KEY, name TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'DRAFT',            -- DRAFT | RUNNING | PAUSED | COMPLETED
@@ -47,6 +57,7 @@ CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT);
 CREATE TABLE IF NOT EXISTS import_batches(
   id INTEGER PRIMARY KEY, filename TEXT NOT NULL, graduation_year INTEGER,
   added INTEGER NOT NULL DEFAULT 0, updated INTEGER NOT NULL DEFAULT 0, unique_students INTEGER NOT NULL DEFAULT 0,
+  category TEXT NOT NULL DEFAULT 'PLACEMENT',      -- PLACEMENT | HIGHER_STUDIES | ENTREPRENEURSHIP
   created_at TEXT NOT NULL DEFAULT (datetime('now')));
 CREATE TABLE IF NOT EXISTS import_batch_alumni(
   import_id INTEGER NOT NULL REFERENCES import_batches(id) ON DELETE CASCADE,
@@ -84,3 +95,6 @@ def init():
     os.makedirs(os.path.dirname(config.DB_PATH), exist_ok=True)
     with db() as c:
         c.executescript(SCHEMA)
+        # Databases created before the three-category change: add the column that records each file's type.
+        if "category" not in {r["name"] for r in c.execute("PRAGMA table_info(import_batches)")}:
+            c.execute("ALTER TABLE import_batches ADD COLUMN category TEXT NOT NULL DEFAULT 'PLACEMENT'")

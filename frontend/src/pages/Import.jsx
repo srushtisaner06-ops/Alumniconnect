@@ -2,7 +2,9 @@ import React, { useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { AlertTriangle, CheckCircle2, Download, FileSpreadsheet, Loader2, XCircle } from 'lucide-react'
 import { api, download } from '../api'
-import { Badge, ErrorBox, PageHeader, useToast } from '../ui.jsx'
+import { Badge, CATEGORIES, CATEGORY_KEYS, ErrorBox, PageHeader, useLoad, useToast } from '../ui.jsx'
+
+const FILE_NAMES = { PLACEMENT: 'placement_template.xlsx', HIGHER_STUDIES: 'higher_studies_template.xlsx', ENTREPRENEURSHIP: 'entrepreneurship_template.xlsx' }
 
 export default function Import() {
   const toast = useToast()
@@ -10,41 +12,51 @@ export default function Import() {
   const inputRef = useRef()
   const [file, setFile] = useState(null)
   const [year, setYear] = useState('')
+  const [category, setCategory] = useState('')   // '' = detect from the file's columns
   const [rep, setRep] = useState(null)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
   const [replace, setReplace] = useState(false)
   const [skip, setSkip] = useState(false)
+  const formats = useLoad(() => api('/import/formats'), [])
 
-  const formFor = (f, extra = {}) => { const fd = new FormData(); fd.append('file', f); if (year) fd.append('graduation_year', year); Object.entries(extra).forEach(([k, v]) => fd.append(k, v)); return fd }
+  const formFor = (f, extra = {}) => {
+    const fd = new FormData(); fd.append('file', f)
+    if (year) fd.append('graduation_year', year)
+    if (category) fd.append('category', category)
+    Object.entries(extra).forEach(([k, v]) => fd.append(k, v)); return fd
+  }
 
-  async function validate(f = file, y = year) {
+  async function validate(f = file, y = year, cat = category) {
     if (!f) return
     setBusy(true); setErr(null); setRep(null)
     try {
-      const fd = new FormData(); fd.append('file', f); if (y) fd.append('graduation_year', y)
+      const fd = new FormData(); fd.append('file', f); if (y) fd.append('graduation_year', y); if (cat) fd.append('category', cat)
       setRep(await api('/import/validate', { method: 'POST', form: fd }))
     } catch (e) { setErr(e) } finally { setBusy(false) }
   }
   async function commit() {
-    if (replace && !window.confirm('This permanently removes ALL existing alumni, submissions and reminder history before importing. Continue?')) return
+    if (replace && !window.confirm('This permanently removes ALL existing alumni (placement, higher studies and entrepreneurship), submissions and reminder history before importing. Continue?')) return
     setBusy(true); setErr(null)
     try {
       const r = await api('/import', { method: 'POST', form: formFor(file, { replace, skip_invalid: skip }) })
-      toast(`Imported ${r.unique_students} students (${r.added} new, ${r.updated} updated).`)
+      toast(`Imported ${r.unique_students} ${r.category_label} record${r.unique_students === 1 ? '' : 's'} (${r.added} new student${r.added === 1 ? '' : 's'}, ${r.updated} updated).`)
       nav('/dashboard/alumni')
     } catch (e) { setErr(e); if (e.detail?.report) setRep(e.detail.report) } finally { setBusy(false) }
   }
   const hasRowErrors = rep && rep.errors.length > 0 && rep.missing_columns.length === 0
-  const canImport = rep && rep.missing_columns.length === 0 && rep.graduation_year && rep.summary?.unique_students > 0 && (rep.ok || (skip && rep.summary.valid_rows > 0))
+  const canImport = rep && rep.category && rep.missing_columns.length === 0 && rep.graduation_year && rep.summary?.unique_students > 0 && (rep.ok || (skip && rep.summary.valid_rows > 0))
+  const cat = rep?.category ? CATEGORIES[rep.category] : null
 
   return (
     <>
-      <PageHeader title="Import alumni" sub="Upload a placement sheet in the same format as the reference (Table 4.6.1 Placement Record)">
-        <button className="btn-ghost" onClick={() => download('/import/template', 'placement_template.xlsx').catch((e) => toast(e.message, 'err'))}><Download className="h-4 w-4" />Download template</button>
+      <PageHeader title="Import records" sub="Upload a Placement (4.6.1), Higher Studies (4.6.2) or Entrepreneurship (4.6.3) sheet in the reference format">
+        {CATEGORY_KEYS.map((k) => (
+          <button key={k} className="btn-ghost" onClick={() => download(`/import/template?category=${k}`, FILE_NAMES[k]).catch((e) => toast(e.message, 'err'))}>
+            <Download className="h-4 w-4" />{CATEGORIES[k].label} template</button>))}
       </PageHeader>
       <div className="card p-5">
-        <div className="grid gap-4 sm:grid-cols-[1fr_200px]">
+        <div className="grid gap-4 sm:grid-cols-[1fr_200px_220px]">
           <div>
             <label className="label" htmlFor="file">File (.xlsx or .csv)</label>
             <div className="flex items-center gap-3 rounded-lg border-2 border-dashed border-slate-300 p-4">
@@ -53,6 +65,13 @@ export default function Import() {
               <input id="file" ref={inputRef} type="file" accept=".xlsx,.xlsm,.csv" className="sr-only" onChange={(e) => { const f = e.target.files[0]; setFile(f); validate(f) }} />
               <button className="btn-ghost" onClick={() => inputRef.current.click()}>Choose file</button>
             </div>
+          </div>
+          <div>
+            <label className="label" htmlFor="category">Record type</label>
+            <select id="category" className="input" value={category} onChange={(e) => { setCategory(e.target.value); validate(file, year, e.target.value) }}>
+              <option value="">Detect automatically</option>
+              {CATEGORY_KEYS.map((k) => <option key={k} value={k}>{CATEGORIES[k].label} ({CATEGORIES[k].table})</option>)}
+            </select>
           </div>
           <div>
             <label className="label" htmlFor="year">Graduation year</label>
@@ -64,10 +83,21 @@ export default function Import() {
       <div className="mt-4"><ErrorBox error={err} /></div>
       {busy && <p className="mt-4 flex items-center gap-2 text-sm text-slate-500"><Loader2 className="h-4 w-4 animate-spin" />Checking file…</p>}
 
+      {!rep && !busy && formats.data && (
+        <div className="mt-4 grid gap-4 lg:grid-cols-3">
+          {formats.data.formats.map((f) => (
+            <div key={f.category} className="card p-4">
+              <h2 className="mb-1 flex items-center gap-2 text-sm font-medium">{f.table}<Badge tone={CATEGORIES[f.category].tone}>{f.label}</Badge></h2>
+              <p className="mb-2 text-xs text-slate-500">Expected columns, in any order:</p>
+              <ol className="list-decimal space-y-0.5 pl-5 text-xs text-slate-700">{f.columns.map((c) => <li key={c}>{c}</li>)}</ol>
+            </div>))}
+        </div>)}
+
       {rep && (
         <div className="mt-4 space-y-4">
           <div className="card p-5">
-            <h2 className="mb-3 flex items-center gap-2 font-medium">Format check
+            <h2 className="mb-3 flex flex-wrap items-center gap-2 font-medium">Format check
+              {cat && <Badge tone={cat.tone}>{rep.detected ? 'Detected' : 'Selected'}: {cat.label}</Badge>}
               {rep.missing_columns.length === 0 ? <Badge tone="green">Matches reference</Badge> : <Badge tone="red">Does not match</Badge>}</h2>
             <ul className="grid gap-1 text-sm sm:grid-cols-2">
               {rep.expected_columns.map((c) => {
@@ -100,14 +130,14 @@ export default function Import() {
 
           {rep.preview?.length > 0 && (
             <div className="card overflow-x-auto p-5"><h2 className="mb-2 font-medium">Preview</h2>
-              <table className="w-full text-left text-sm"><tbody>{rep.preview.map((p) => <tr key={p.prn} className="border-t border-slate-100"><td className="py-1 pr-3 font-mono text-xs">{p.prn}</td><td className="pr-3">{p.name}</td><td className="pr-3 text-slate-500">{p.offers}</td></tr>)}</tbody></table></div>)}
+              <table className="w-full text-left text-sm"><tbody>{rep.preview.map((p) => <tr key={p.prn} className="border-t border-slate-100"><td className="py-1 pr-3 font-mono text-xs">{p.prn}</td><td className="pr-3">{p.name}</td><td className="pr-3 text-slate-500">{p.details}</td></tr>)}</tbody></table></div>)}
 
           <div className="card space-y-3 p-5">
             {hasRowErrors && <label className="flex items-start gap-2 text-sm"><input type="checkbox" className="mt-0.5" checked={skip} onChange={(e) => setSkip(e.target.checked)} />
               <span>Skip the invalid rows and import the valid ones. <span className="text-slate-500">Without this, the whole file is rejected.</span></span></label>}
             <label className="flex items-start gap-2 text-sm"><input type="checkbox" className="mt-0.5" checked={replace} onChange={(e) => setReplace(e.target.checked)} />
-              <span>Replace all existing data. <span className="text-slate-500">Otherwise records are merged by PRN: contact details are updated and new offers added.</span></span></label>
-            <button className="btn-primary" disabled={!canImport || busy} onClick={commit}>{busy && <Loader2 className="h-4 w-4 animate-spin" />}Import {rep.summary?.unique_students ?? 0} students</button>
+              <span>Replace all existing data. <span className="text-slate-500">This clears every category, not just {cat?.label?.toLowerCase() || 'this one'}. Otherwise records are merged by PRN: contact details are updated and new {cat?.label?.toLowerCase() || ''} records added.</span></span></label>
+            <button className="btn-primary" disabled={!canImport || busy} onClick={commit}>{busy && <Loader2 className="h-4 w-4 animate-spin" />}Import {rep.summary?.unique_students ?? 0} {cat?.label?.toLowerCase() ?? ''} student{rep.summary?.unique_students === 1 ? '' : 's'}</button>
           </div>
         </div>)}
     </>
