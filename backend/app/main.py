@@ -155,7 +155,7 @@ def list_alumni(search: str = "", status: str = "all", page: int = 1, page_size:
     q = search.strip()
     where, args = [], []
     with db() as c:
-        if re.fullmatch(r"\d{8}", q):          # PRN lookup
+        if re.fullmatch(r"\d{12}", q):          # PRN lookup
             recs = [dict(r) for r in c.execute("SELECT id,prn FROM alumni")]
             hit = engine.search_prn(recs, q)
             where.append("a.id=?")

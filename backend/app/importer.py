@@ -200,8 +200,8 @@ def parse(filename, content, graduation_year=None):
         if not name:
             err("Name of the Student", "Name is empty")
         prn, cleaned = _prn(vals["prn"])
-        if not re.fullmatch(r"\d{8}", prn):
-            err("PRN No.", f"PRN must be 8 digits, got '{_clean_text(vals['prn'])}'")
+        if not re.fullmatch(r"\d{12}", prn):
+            err("PRN No.", f"PRN must be 12 digits, got '{_clean_text(vals['prn'])}'")
         elif cleaned:
             report["warnings"].append({"row": xl, "column": "PRN No.", "message":
                 f"PRN '{_clean_text(vals['prn'])}' cleaned to {prn}"})
