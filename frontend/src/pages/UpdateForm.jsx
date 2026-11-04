@@ -43,28 +43,40 @@ export default function UpdateForm() {
   }
 
   if (!info && !err) return <Spinner />
-  if (!info) return <div className="mx-auto max-w-md p-6"><ErrorBox error={err} /><p className="mt-3 text-sm text-slate-500">Please use the exact link from your email, or contact the department.</p></div>
+  if (!info) return <div className="mx-auto max-w-md p-10"><ErrorBox error={err} /><p className="mt-3 text-sm text-slate-500">Please use the exact link from your email, or contact the department.</p></div>
   return (
-    <div className="mx-auto max-w-xl p-4 sm:p-8">
-      <div className="card p-5 sm:p-7">
-        <h1 className="text-xl font-semibold">Hello, {info.name.split(' ')[0]}</h1>
-        <p className="mt-1 text-sm text-slate-500">Batch of {info.graduation_year} · PRN {info.prn}</p>
-        {info.status === 'COMPLETED' && <p className="mt-4 rounded-lg bg-emerald-50 p-3 text-sm text-emerald-800">You have already submitted. You can review and update your answers below.</p>}
-        {info.prefill && info.status !== 'COMPLETED' && <p className="mt-4 rounded-lg bg-indigo-50 p-3 text-sm text-indigo-800">We pre-filled some details from your {info.prefill.source} record. Please confirm or correct them.</p>}
-        <form onSubmit={submit} className="mt-5 space-y-5">
+    <div className="min-h-screen">
+      <section className="relative overflow-hidden bg-gradient-to-br from-blue-900 via-blue-800 to-indigo-800 text-white">
+        <div className="pointer-events-none absolute -right-20 -top-20 h-80 w-80 rounded-full bg-indigo-300/25 blur-3xl" />
+        <div className="relative mx-auto flex max-w-4xl flex-col items-center gap-4 px-6 pt-10 sm:flex-row sm:px-10">
+          <div className="flex-1 pb-6 sm:pb-12">
+            <span className="silver-chip !text-slate-800">Alumni update</span>
+            <h1 className="mt-4 text-4xl font-semibold leading-tight sm:text-5xl">Hello, {info.name.split(' ')[0]}</h1>
+            <p className="mt-3 text-sm text-slate-200">Batch of {info.graduation_year} · PRN {info.prn}</p>
+          </div>
+          <img src="/img/hero-campus.svg" alt="" className="w-full max-w-xs drop-shadow-2xl sm:w-[44%]" />
+        </div>
+        <div className="silver-bar" />
+      </section>
+      <div className="mx-auto max-w-xl px-6 py-12">
+        {info.career_status && <p className="mb-6 border-l-4 border-emerald-400 py-1 pl-3 text-sm text-emerald-800">You have already submitted. You can review and update your answers below.</p>}
+        {info.prefill && !info.career_status && <p className="mb-6 border-l-4 border-indigo-400 py-1 pl-3 text-sm text-indigo-800">We pre-filled some details from your {info.prefill.source} record. Please confirm or correct them.</p>}
+        <form onSubmit={submit} className="space-y-8">
           <ErrorBox error={err} />
-          <fieldset><legend className="label">What are you doing now?</legend>
-            <div className="grid grid-cols-3 gap-2">
+          <fieldset><legend className="section-title mb-5">What are you doing now?</legend>
+            <div className="grid grid-cols-3 gap-4">
               {OPTIONS.map(({ v, label, icon: Icon }) => (
-                <label key={v} className={`flex cursor-pointer flex-col items-center gap-1 break-words rounded-lg border p-2 text-center text-xs font-medium sm:p-3 sm:text-sm ${kind === v ? 'border-indigo-600 bg-indigo-50 text-indigo-700 ring-2 ring-indigo-200' : 'border-slate-300 hover:bg-slate-50'}`}>
-                  <input type="radio" name="kind" value={v} className="sr-only" checked={kind === v} onChange={() => { setKind(v); if (kind !== v) setD({}) }} /><Icon className="h-5 w-5" />{label}</label>))}
+                <label key={v} className={`group flex cursor-pointer flex-col items-center gap-3 break-words pb-3 text-center text-xs font-medium transition sm:text-sm ${kind === v ? 'text-indigo-800' : 'text-slate-500 hover:text-slate-800'}`}>
+                  <input type="radio" name="kind" value={v} className="sr-only" checked={kind === v} onChange={() => { setKind(v); if (kind !== v) setD({}) }} />
+                  <span className={`flex h-16 w-16 items-center justify-center rounded-full transition ${kind === v ? 'bg-gradient-to-br from-indigo-300 to-indigo-500 text-white shadow-lg shadow-indigo-900/20' : 'silver-bg text-slate-600 group-hover:brightness-105'}`}><Icon className="h-7 w-7" /></span>
+                  <span className={`border-b-2 pb-0.5 ${kind === v ? 'border-indigo-500' : 'border-transparent'}`}>{label}</span></label>))}
             </div></fieldset>
           {kind && FIELDS[kind].map(([k, label, req, type, opts]) => (
             <div key={k}><label className="label" htmlFor={k}>{label}{req && <span className="text-red-600"> *</span>}</label>
               {type === 'textarea' ? <textarea id={k} rows={3} maxLength={1000} className="input" value={d[k] || ''} onChange={(e) => setD({ ...d, [k]: e.target.value })} />
                 : type === 'select' ? <select id={k} required className="input" value={d[k] || ''} onChange={(e) => setD({ ...d, [k]: e.target.value })}><option value="">Select…</option>{opts.map((o) => <option key={o}>{o}</option>)}</select>
                 : <input id={k} required={req} maxLength={200} className="input" value={d[k] || ''} onChange={(e) => setD({ ...d, [k]: e.target.value })} />}</div>))}
-          <button className="btn-primary w-full py-2.5" disabled={!kind || busy}>{busy && <Loader2 className="h-4 w-4 animate-spin" />}Submit</button>
+          <button className="btn-primary w-full py-3.5 text-base" disabled={!kind || busy}>{busy && <Loader2 className="h-4 w-4 animate-spin" />}Submit</button>
         </form>
       </div>
     </div>

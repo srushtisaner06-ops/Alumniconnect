@@ -38,11 +38,11 @@ export default function Alumni() {
   }
   return (
     <>
-      <PageHeader title="Alumni directory" sub="Search, review and maintain alumni records.">
+      <PageHeader eyebrow="Directory" title="Alumni directory" sub="Search, review and maintain alumni records." art="/img/art-people.svg">
         <button className="btn-ghost" onClick={doUndo} disabled={!undo.data?.count} title={undo.data?.next || 'Nothing to undo'}>
           <Undo2 className="h-4 w-4" />Undo last action</button>
       </PageHeader>
-      <div className="card mb-5 p-4 sm:p-5">
+      <div className="mb-8">
         <form onSubmit={submitSearch} className="flex flex-col gap-3 sm:flex-row">
           <div className="relative min-w-0 flex-1">
             <Search className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-slate-400" />
@@ -51,36 +51,36 @@ export default function Alumni() {
           <button className="btn-primary sm:min-w-28" type="submit"><Search className="h-4 w-4" />Search</button>
           {(q || search) && <button className="btn-ghost" type="button" onClick={clearSearch}>Clear</button>}
         </form>
-        <div className="mt-4 flex flex-col gap-3 border-t border-slate-100 pt-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="mt-4 flex flex-col gap-3 border-t border-sky-200 pt-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Filter by category</div>
           <div className="flex flex-wrap gap-1.5" role="tablist" aria-label="Filter alumni by category">
             {[['all', 'All categories'], ...CATEGORY_KEYS.map((k) => [k, CATEGORIES[k].label])].map(([v, l]) => (
               <button key={v} role="tab" aria-selected={category === v} onClick={() => { setCategory(v); setPage(1) }}
-                className={`rounded-lg border px-3 py-1.5 text-sm font-medium transition ${category === v ? 'border-blue-800 bg-blue-800 text-white' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`}>
+                className={`tab ${category === v ? 'tab-on' : ''}`}>
                 {l}{list.data?.category_counts && <span className="ml-1.5 opacity-75">{list.data.category_counts[v]}</span>}</button>))}
           </div>
         </div>
-        <div className="mt-3 flex flex-col gap-3 border-t border-slate-100 pt-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="mt-3 flex flex-col gap-3 border-t border-sky-200 pt-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Filter by submission status</div>
           <div className="flex flex-wrap gap-1.5" role="tablist" aria-label="Filter alumni by status">
             {TABS.map(([v, l]) => (
               <button key={v} role="tab" aria-selected={status === v} onClick={() => { setStatus(v); setPage(1) }}
-                className={`rounded-lg border px-3 py-1.5 text-sm font-medium transition ${status === v ? 'border-blue-800 bg-blue-800 text-white' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`}>{l}</button>))}
+                className={`tab ${status === v ? 'tab-on' : ''}`}>{l}</button>))}
           </div>
         </div>
       </div>
       <ErrorBox error={list.error} retry={list.reload} />
-      <div className="card overflow-hidden">
-        <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3 sm:px-5"><h2 className="section-title">Alumni records</h2><span className="text-xs text-slate-500">{list.data ? `${list.data.total} total` : 'Loading records'}</span></div>
+      <div className="card">
+        <div className="flex items-center justify-between border-b border-sky-200 px-4 py-3 sm:px-5"><h2 className="section-title">Alumni records</h2><span className="text-xs text-slate-500">{list.data ? `${list.data.total} total` : 'Loading records'}</span></div>
         <div className="overflow-x-auto">
         <table className="w-full text-left text-sm">
           <thead className="border-b border-slate-200 bg-slate-50 text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500">
             <tr><th className="px-4 py-3">Sr</th><th className="px-4 py-3">Name</th><th className="px-4 py-3">PRN</th><th className="px-4 py-3">Category</th><th className="px-4 py-3">{COLS[category][0]}</th><th className="px-4 py-3">{COLS[category][1]}</th><th className="px-4 py-3">Status</th></tr>
           </thead>
-          <tbody className="divide-y divide-slate-100">
+          <tbody className="divide-y divide-sky-200">
             {list.loading && <tr><td colSpan={7}><Spinner /></td></tr>}
             {!list.loading && list.data?.items.map((a) => { const sm = summarize(a, category); return (
-              <tr key={a.id} className="cursor-pointer transition-colors hover:bg-blue-50/50" onClick={() => setOpenId(a.id)} tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && setOpenId(a.id)}>
+              <tr key={a.id} className="cursor-pointer transition-colors hover:bg-indigo-100/40" onClick={() => setOpenId(a.id)} tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && setOpenId(a.id)}>
                 <td className="px-4 py-3 text-slate-500">{a.sr_no}</td>
                 <td className="px-4 py-3 font-medium">{a.name}{a.unsubscribed ? <span className="ml-2"><Badge>unsubscribed</Badge></span> : null}</td>
                 <td className="px-4 py-3 font-mono text-xs">{a.prn}</td>
@@ -125,11 +125,11 @@ function Drawer({ id, onClose, onChanged }) {
     try { await api(`/alumni/${id}`, { method: 'DELETE' }); toast('Deleted. Use Undo to restore.'); onChanged(); onClose() } catch (e) { toast(e.message, 'err') }
   }
   return (
-    <div className="fixed inset-0 z-40 flex justify-end bg-slate-900/30" onClick={onClose}>
-      <aside className="h-full w-full max-w-md overflow-y-auto bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Alumnus details">
+    <div className="fixed inset-0 z-40 flex justify-end bg-blue-900/30" onClick={onClose}>
+      <aside className="h-full w-full max-w-md overflow-y-auto bg-slate-50 p-7 shadow-2xl" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Alumnus details">
         <div className="mb-4 flex items-start justify-between">
           <div><h2 className="text-lg font-semibold">{a?.name || 'Alumnus'}</h2>{a && <div className="font-mono text-xs text-slate-500">PRN {a.prn}</div>}</div>
-          <button onClick={onClose} aria-label="Close" className="rounded p-1 hover:bg-slate-100"><X className="h-5 w-5" /></button>
+          <button onClick={onClose} aria-label="Close" className="rounded-full p-1.5 hover:bg-slate-200/60"><X className="h-5 w-5" /></button>
         </div>
         {loading && <Spinner />}<ErrorBox error={error} retry={reload} />
         {a && (
@@ -145,7 +145,7 @@ function Drawer({ id, onClose, onChanged }) {
             {a.offers.length > 0 && (
               <section><h3 className="mb-2 flex items-center gap-2 font-medium">Placement record <Badge tone={CATEGORIES.PLACEMENT.tone}>{CATEGORIES.PLACEMENT.table}</Badge></h3>
                 {a.offers.map((o) => (
-                  <div key={o.id} className="mb-2 rounded-lg border border-slate-200 p-3">
+                  <div key={o.id} className="mb-2 border-l-2 border-sky-300 py-1 pl-3">
                     <div className="flex justify-between"><span className="font-medium">{o.employer}</span><span className="tabular-nums">{o.package_lpa} LPA</span></div>
                     <div className="text-slate-500">{o.position || 'Position not recorded'}</div>
                     {o.letter_ref && <div className="text-xs text-slate-500">Letter: {o.letter_ref}</div>}
@@ -155,7 +155,7 @@ function Drawer({ id, onClose, onChanged }) {
             {a.higher_studies.length > 0 && (
               <section><h3 className="mb-2 flex items-center gap-2 font-medium">Higher studies <Badge tone={CATEGORIES.HIGHER_STUDIES.tone}>{CATEGORIES.HIGHER_STUDIES.table}</Badge></h3>
                 {a.higher_studies.map((h) => (
-                  <div key={h.id} className="mb-2 rounded-lg border border-slate-200 p-3">
+                  <div key={h.id} className="mb-2 border-l-2 border-sky-300 py-1 pl-3">
                     <div className="font-medium">{h.degree}</div>
                     <div className="text-slate-500">{h.institution}</div>
                     <LetterLink href={h.letter_link} label="Admission / appointment letter" />
@@ -164,7 +164,7 @@ function Drawer({ id, onClose, onChanged }) {
             {a.ventures.length > 0 && (
               <section><h3 className="mb-2 flex items-center gap-2 font-medium">Entrepreneurship <Badge tone={CATEGORIES.ENTREPRENEURSHIP.tone}>{CATEGORIES.ENTREPRENEURSHIP.table}</Badge></h3>
                 {a.ventures.map((v) => (
-                  <div key={v.id} className="mb-2 rounded-lg border border-slate-200 p-3">
+                  <div key={v.id} className="mb-2 border-l-2 border-sky-300 py-1 pl-3">
                     <div className="font-medium">{v.company}</div>
                     <div className="font-mono text-xs text-slate-500">Reg. no. {v.registration_no}</div>
                     {v.website && <a className="inline-flex items-center gap-1 break-all text-xs text-indigo-600" href={v.website} target="_blank" rel="noreferrer">{v.website} <ExternalLink className="h-3 w-3 shrink-0" /></a>}
@@ -182,10 +182,10 @@ function Drawer({ id, onClose, onChanged }) {
                 <button className="btn-ghost" onClick={() => patch({ telegram_chat_id: chat }, 'Saved')}>Save</button></div></section>
             <section><h3 className="mb-2 font-medium">Reminders · {a.reminders_sent} sent</h3>
               {a.history.length === 0 ? <p className="text-slate-500">None yet.</p> : a.history.map((h) => (
-                <div key={h.id} className="flex items-center justify-between border-b border-slate-100 py-1 text-xs">
+                <div key={h.id} className="flex items-center justify-between border-b border-sky-200 py-1 text-xs">
                   <span>{h.campaign} · {h.channel}</span><span className="flex items-center gap-2"><Badge tone={h.status === 'FAILED' ? 'red' : h.status === 'SKIPPED' ? 'slate' : 'green'}>{h.status}</Badge>{fmtDate(h.created_at)}</span></div>))}
             </section>
-            <div className="flex flex-wrap gap-2 border-t border-slate-100 pt-4">
+            <div className="flex flex-wrap gap-2 border-t border-sky-200 pt-4">
               <button className="btn-ghost" onClick={() => patch({ unsubscribed: !a.unsubscribed }, a.unsubscribed ? 'Re-subscribed' : 'Unsubscribed')}>{a.unsubscribed ? 'Re-subscribe' : 'Unsubscribe from reminders'}</button>
               <button className="btn-danger" onClick={del}><Trash2 className="h-4 w-4" />Delete</button>
             </div>

@@ -1,0 +1,14 @@
+<svg viewBox="0 0 480 320" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Reports illustration"><defs>
+ <linearGradient id="sil" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FAFBFC"/><stop offset=".5" stop-color="#B9BEC6"/><stop offset="1" stop-color="#E8EAEE"/></linearGradient>
+ <linearGradient id="lav" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#CBC0E2"/><stop offset="1" stop-color="#7C6CA2"/></linearGradient>
+ <linearGradient id="brn" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#A98162"/><stop offset="1" stop-color="#5A3E31"/></linearGradient>
+ <linearGradient id="bge" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FBF7F1"/><stop offset="1" stop-color="#E3D6C1"/></linearGradient>
+</defs>
+<circle cx="250" cy="170" r="130" fill="#E8E2F2" opacity=".7"/>
+<rect x="120" y="70" width="290" height="190" rx="14" fill="#FBF7F1" opacity=".85" stroke="#E3D6C1" stroke-width="2"/>
+<g stroke="#E3D6C1" stroke-width="1.5"><path d="M135 130 H395"/><path d="M135 175 H395"/><path d="M135 220 H395"/></g>
+<rect x="150" y="190" width="34" height="90" rx="6" fill="url(#lav)"/><rect x="205" y="160" width="34" height="120" rx="6" fill="url(#brn)"/><rect x="260" y="205" width="34" height="75" rx="6" fill="url(#sil)"/><rect x="315" y="130" width="34" height="150" rx="6" fill="url(#lav)"/><rect x="370" y="155" width="34" height="125" rx="6" fill="url(#brn)"/>
+<path d="M150 200 L205 160 L260 185 L315 110 L378 128" fill="none" stroke="#7C6CA2" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+<g fill="#fff" stroke="#7C6CA2" stroke-width="3"><circle cx="150" cy="200" r="6"/><circle cx="205" cy="160" r="6"/><circle cx="260" cy="185" r="6"/><circle cx="315" cy="110" r="6"/><circle cx="378" cy="128" r="6"/></g>
+<g transform="translate(402 238)"><circle r="40" fill="#fff" stroke="url(#sil)" stroke-width="8"/><path d="M0 -32 A32 32 0 1 1 -30 11" fill="none" stroke="url(#lav)" stroke-width="10" stroke-linecap="round" transform="rotate(0)"/><circle r="12" fill="url(#brn)"/></g>
+</svg>

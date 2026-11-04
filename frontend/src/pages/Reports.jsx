@@ -24,59 +24,59 @@ export default function Reports() {
   const careerRows = Object.entries(career).map(([k, v]) => ({ k: CAREER[k], v }))
   return (
     <>
-      <PageHeader title="Reports" sub="Analytics and exports for NIRF / NBA documentation">
+      <PageHeader eyebrow="Analytics" title="Reports" sub="Analytics and exports for NIRF / NBA documentation" art="/img/art-chart.svg">
         <button className="btn-ghost" onClick={() => dl('submissions', 'xlsx')}><Download className="h-4 w-4" />Submissions (Excel)</button>
         <button className="btn-ghost" onClick={() => dl('submissions', 'csv')}><Download className="h-4 w-4" />Submissions (CSV)</button>
         <button className="btn-ghost" onClick={() => dl('placement', 'xlsx')}><Download className="h-4 w-4" />Placement 4.6.1 (Excel)</button>
         <button className="btn-ghost" onClick={() => dl('higher_studies', 'xlsx')}><Download className="h-4 w-4" />Higher studies 4.6.2 (Excel)</button>
         <button className="btn-ghost" onClick={() => dl('entrepreneurship', 'xlsx')}><Download className="h-4 w-4" />Entrepreneurship 4.6.3 (Excel)</button>
       </PageHeader>
-      <div className="grid gap-4 lg:grid-cols-2">
-        <div className="card p-5"><h2 className="mb-1 font-medium">Submission rate</h2>
-          <p className="mb-3 text-3xl font-semibold">{s.completion_pct}%</p><Progress value={s.completion_pct} />
+      <div className="grid gap-x-14 gap-y-12 lg:grid-cols-2">
+        <div className="card"><h2 className="section-title mb-1">Submission rate</h2>
+          <p className="mb-3 font-display text-6xl font-semibold">{s.completion_pct}%</p><Progress value={s.completion_pct} />
           <p className="mt-2 text-sm text-slate-500">{s.completed} completed · {s.pending} pending · {s.overdue} overdue</p></div>
-        <div className="card p-5"><h2 className="mb-3 font-medium">Career status (from submissions)</h2>
+        <div className="card"><h2 className="section-title mb-4">Career status (from submissions)</h2>
           {s.completed === 0 ? <p className="text-sm text-slate-500">No submissions yet.</p> : <Bars rows={careerRows} label="k" value="v" />}</div>
-        <div className="card p-5"><h2 className="mb-3 font-medium">Submissions by batch</h2>
+        <div className="card"><h2 className="section-title mb-4">Submissions by batch</h2>
           <Bars rows={by_batch.map((b) => ({ k: `Batch ${b.year}`, v: b.completed, suffix: ` of ${b.total}` }))} label="k" value="v" max={Math.max(1, ...by_batch.map((b) => b.total))} /></div>
-        <div className="card p-5"><h2 className="mb-3 font-medium">Packages (highest offer per student)</h2>
+        <div className="card"><h2 className="section-title mb-4">Packages (highest offer per student)</h2>
           <Bars rows={p.package_bands} label="band" value="students" unit=" students" /></div>
       </div>
-      <div className="card mt-4 p-5">
-        <h2 className="mb-3 font-medium">Placement index (Summary of Tables 4.6.1 – 4.6.3)</h2>
+      <div className="card mt-14">
+        <h2 className="section-title mb-4">Placement index (Summary of Tables 4.6.1 – 4.6.3)</h2>
         <dl className="grid grid-cols-2 gap-4 text-sm sm:grid-cols-3 lg:grid-cols-6">
           {[['X · placed', pr.placed], ['Y · higher studies', pr.higher_studies], ['Z · entrepreneurship', pr.entrepreneurship], ['X + Y + Z', pr.total],
-            ['FS · final-year students', pr.final_year_students ?? '—'], ['Placement index', pr.index != null ? `${pr.index}%` : '—']].map(([l, v]) => <div key={l}><dt className="text-slate-500">{l}</dt><dd className="text-xl font-semibold">{v}</dd></div>)}
+            ['FS · final-year students', pr.final_year_students ?? '—'], ['Placement index', pr.index != null ? `${pr.index}%` : '—']].map(([l, v]) => <div key={l}><dt className="text-slate-500">{l}</dt><dd className="font-display text-3xl font-semibold">{v}</dd></div>)}
         </dl>
         <p className="mt-3 text-xs text-slate-500">Index = (X + Y + Z) ÷ FS × 100. A student who appears in more than one category is counted once. FS comes from the placement sheet's Summary tab{pr.final_year_students ? '' : ' (not imported yet)'}.</p>
       </div>
-      <div className="mt-4 grid gap-4 lg:grid-cols-2">
-        <div className="card p-5"><h2 className="mb-1 font-medium">Higher studies</h2>
+      <div className="mt-14 grid gap-x-14 gap-y-12 lg:grid-cols-2">
+        <div className="card"><h2 className="section-title mb-1">Higher studies</h2>
           <p className="mb-3 text-sm text-slate-500">{hs.students} student{hs.students === 1 ? '' : 's'}</p>
           {hs.students === 0 ? <p className="text-sm text-slate-500">No higher-studies sheet imported yet.</p> : (<>
             <h3 className="mb-1 text-sm font-medium">Colleges / universities</h3>
-            <table className="mb-3 w-full text-left text-sm"><tbody className="divide-y divide-slate-100">{hs.top_institutions.map((i) => <tr key={i.institution}><td className="py-1.5">{i.institution}</td><td className="text-right tabular-nums text-slate-500">{i.students}</td></tr>)}</tbody></table>
+            <table className="mb-3 w-full text-left text-sm"><tbody className="divide-y divide-sky-200">{hs.top_institutions.map((i) => <tr key={i.institution}><td className="py-1.5">{i.institution}</td><td className="text-right tabular-nums text-slate-500">{i.students}</td></tr>)}</tbody></table>
             <h3 className="mb-1 text-sm font-medium">Degrees</h3>
-            <table className="w-full text-left text-sm"><tbody className="divide-y divide-slate-100">{hs.degrees.map((d) => <tr key={d.degree}><td className="py-1.5">{d.degree}</td><td className="text-right tabular-nums text-slate-500">{d.students}</td></tr>)}</tbody></table></>)}
+            <table className="w-full text-left text-sm"><tbody className="divide-y divide-sky-200">{hs.degrees.map((d) => <tr key={d.degree}><td className="py-1.5">{d.degree}</td><td className="text-right tabular-nums text-slate-500">{d.students}</td></tr>)}</tbody></table></>)}
         </div>
-        <div className="card p-5"><h2 className="mb-1 font-medium">Entrepreneurship</h2>
+        <div className="card"><h2 className="section-title mb-1">Entrepreneurship</h2>
           <p className="mb-3 text-sm text-slate-500">{ent.students} student{ent.students === 1 ? '' : 's'} · {ent.ventures} venture{ent.ventures === 1 ? '' : 's'}</p>
           {ent.ventures === 0 ? <p className="text-sm text-slate-500">No entrepreneurship sheet imported yet.</p> : (
-            <table className="w-full text-left text-sm"><tbody className="divide-y divide-slate-100">{ent.companies.map((v) => (
+            <table className="w-full text-left text-sm"><tbody className="divide-y divide-sky-200">{ent.companies.map((v) => (
               <tr key={v.registration_no + v.company}><td className="py-1.5"><div>{v.company}</div><div className="text-xs text-slate-500">{v.founder}</div></td><td className="font-mono text-xs text-slate-500">{v.registration_no}</td></tr>))}</tbody></table>)}
         </div>
       </div>
-      <div className="card mt-4 p-5">
-        <h2 className="mb-3 font-medium">Placement summary (from the placement sheet)</h2>
+      <div className="card mt-14">
+        <h2 className="section-title mb-4">Placement summary (from the placement sheet)</h2>
         <dl className="grid grid-cols-2 gap-4 text-sm sm:grid-cols-3 lg:grid-cols-6">
           {[['Students placed', p.students_placed], ['Offers', p.offers], ['Average', `${p.avg_package} LPA`], ['Median', `${p.median_package} LPA`], ['Highest', `${p.highest_package} LPA`],
-            ['Placed ÷ final year', p.placement_index != null ? `${p.placement_index}%` : '—']].map(([l, v]) => <div key={l}><dt className="text-slate-500">{l}</dt><dd className="text-xl font-semibold">{v}</dd></div>)}
+            ['Placed ÷ final year', p.placement_index != null ? `${p.placement_index}%` : '—']].map(([l, v]) => <div key={l}><dt className="text-slate-500">{l}</dt><dd className="font-display text-3xl font-semibold">{v}</dd></div>)}
         </dl>
         {p.final_year_students && <p className="mt-3 text-xs text-slate-500">Placed ÷ final year = unique students placed ÷ {p.final_year_students} final-year students (from the sheet's Summary tab).</p>}
-        {p.multi_offer_students > 0 && <p className="mt-3 flex gap-2 rounded-lg bg-amber-50 p-3 text-sm text-amber-800"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+        {p.multi_offer_students > 0 && <p className="mt-3 flex gap-2 border-l-4 border-amber-400 py-1 pl-3 text-sm text-amber-800"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
           <span>{p.multi_offer_students} students hold more than one offer. If the Summary tab counts offers ({p.offers}) as "students placed", its placement index is overstated. This app counts each student once ({p.students_placed}).</span></p>}
         <h3 className="mb-2 mt-5 text-sm font-medium">Top recruiters</h3>
-        <table className="w-full text-left text-sm"><tbody className="divide-y divide-slate-100">
+        <table className="w-full text-left text-sm"><tbody className="divide-y divide-sky-200">
           {p.top_employers.map((e) => <tr key={e.employer}><td className="py-1.5">{e.employer}</td><td className="text-slate-500">{e.students} student{e.students > 1 ? 's' : ''}</td><td className="text-right tabular-nums">up to {e.top_package} LPA</td></tr>)}
         </tbody></table>
       </div>

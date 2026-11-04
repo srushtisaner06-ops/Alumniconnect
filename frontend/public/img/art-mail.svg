@@ -1,0 +1,15 @@
+<svg viewBox="0 0 480 320" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Reminders illustration"><defs>
+ <linearGradient id="sil" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FAFBFC"/><stop offset=".5" stop-color="#B9BEC6"/><stop offset="1" stop-color="#E8EAEE"/></linearGradient>
+ <linearGradient id="lav" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#CBC0E2"/><stop offset="1" stop-color="#7C6CA2"/></linearGradient>
+ <linearGradient id="brn" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#A98162"/><stop offset="1" stop-color="#5A3E31"/></linearGradient>
+ <linearGradient id="bge" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FBF7F1"/><stop offset="1" stop-color="#E3D6C1"/></linearGradient>
+</defs>
+<circle cx="240" cy="170" r="125" fill="#E8E2F2" opacity=".7"/>
+<rect x="120" y="140" width="240" height="150" rx="12" fill="url(#bge)" stroke="#D5C5AE" stroke-width="2"/>
+<path d="M120 152 L240 232 L360 152" fill="none" stroke="#A98162" stroke-width="5" stroke-linejoin="round"/>
+<path d="M120 288 L206 210 M360 288 L274 210" stroke="#D5C5AE" stroke-width="3"/>
+<path d="M148 150 q92 -86 184 0" fill="none" stroke="#C9BEE0" stroke-width="3" stroke-dasharray="3 7"/>
+<g transform="translate(300 78) rotate(-14)"><path d="M0 40 L130 0 L60 90 L50 52Z" fill="url(#sil)" stroke="#fff" stroke-width="3" stroke-linejoin="round"/><path d="M50 52 L130 0 L60 90Z" fill="url(#lav)"/><path d="M0 40 L50 52" stroke="#9AA0A9" stroke-width="2"/></g>
+<path d="M70 118 q60 22 100 0 t90 -40" fill="none" stroke="#9283B6" stroke-width="3" stroke-dasharray="2 8" stroke-linecap="round"/>
+<g transform="translate(112 238)"><circle r="26" fill="url(#brn)" stroke="#fff" stroke-width="4"/><path d="M-9 8 q9 -22 18 0 M-12 10 h24 M0 14 v3" fill="none" stroke="#F8F1EA" stroke-width="3.5" stroke-linecap="round"/></g>
+</svg>

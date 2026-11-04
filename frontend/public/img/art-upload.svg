@@ -1,0 +1,13 @@
+<svg viewBox="0 0 480 320" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Import illustration"><defs>
+ <linearGradient id="sil" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FAFBFC"/><stop offset=".5" stop-color="#B9BEC6"/><stop offset="1" stop-color="#E8EAEE"/></linearGradient>
+ <linearGradient id="lav" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#CBC0E2"/><stop offset="1" stop-color="#7C6CA2"/></linearGradient>
+ <linearGradient id="brn" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#A98162"/><stop offset="1" stop-color="#5A3E31"/></linearGradient>
+ <linearGradient id="bge" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FBF7F1"/><stop offset="1" stop-color="#E3D6C1"/></linearGradient>
+</defs>
+<circle cx="240" cy="170" r="125" fill="#E8E2F2" opacity=".7"/>
+<g transform="rotate(-6 240 200)"><rect x="130" y="100" width="220" height="150" rx="10" fill="url(#bge)" stroke="#D5C5AE" stroke-width="2"/>
+<rect x="130" y="100" width="220" height="26" rx="10" fill="url(#lav)"/><rect x="150" y="128" width="180" height="1.5" fill="#CFC3B2"/><rect x="150" y="150" width="180" height="1.5" fill="#CFC3B2"/><rect x="150" y="172" width="180" height="1.5" fill="#CFC3B2"/><rect x="150" y="194" width="180" height="1.5" fill="#CFC3B2"/><rect x="150" y="216" width="180" height="1.5" fill="#CFC3B2"/><rect x="150" y="238" width="180" height="1.5" fill="#CFC3B2"/><rect x="196" y="112" width="1.5" height="130" fill="#CFC3B2"/><rect x="240" y="112" width="1.5" height="130" fill="#CFC3B2"/><rect x="284" y="112" width="1.5" height="130" fill="#CFC3B2"/></g>
+<g transform="translate(240 70)"><path d="M-70 24 a34 34 0 0 1 8 -66 a46 46 0 0 1 88 -6 a36 36 0 0 1 20 72z" fill="url(#sil)" stroke="#fff" stroke-width="4"/>
+<path d="M0 14 v-42 M-16 -12 l16 -16 l16 16" fill="none" stroke="#6B4A3A" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/></g>
+<g transform="translate(372 232)"><circle r="26" fill="url(#lav)" stroke="#fff" stroke-width="4"/><path d="M-11 0 l8 8 l15 -16" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/></g>
+</svg>

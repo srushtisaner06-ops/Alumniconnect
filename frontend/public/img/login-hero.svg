@@ -1,0 +1,35 @@
+<svg viewBox="0 0 480 320" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Campus illustration">
+  <defs>
+    <linearGradient id="sil" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#F7F8FA"/><stop offset=".5" stop-color="#BCC1C8"/><stop offset="1" stop-color="#E6E8EC"/></linearGradient>
+    <linearGradient id="lav" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#BEB1D8"/><stop offset="1" stop-color="#7C6CA2"/></linearGradient>
+    <linearGradient id="brn" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#A98162"/><stop offset="1" stop-color="#6B4A3A"/></linearGradient>
+    <linearGradient id="bge" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#F8F1EA"/><stop offset="1" stop-color="#E7DBC8"/></linearGradient>
+  </defs>
+  <circle cx="370" cy="70" r="46" fill="url(#sil)" opacity=".95"/>
+  <circle cx="370" cy="70" r="60" fill="none" stroke="#E9EBEE" stroke-opacity=".35"/>
+  <path d="M0 250 Q90 190 190 235 T380 215 T480 235 V320 H0Z" fill="#7C6CA2" opacity=".55"/>
+  <path d="M0 275 Q120 225 240 265 T480 255 V320 H0Z" fill="#593D31" opacity=".9"/>
+  <!-- building -->
+  <g transform="translate(110 92)">
+    <path d="M130 0 L20 52 H240Z" fill="url(#sil)"/>
+    <rect x="124" y="-26" width="12" height="28" fill="url(#sil)"/>
+    <path d="M136 -26 h30 l-8 8 8 8 h-30z" fill="url(#lav)"/>
+    <rect x="20" y="52" width="220" height="14" fill="url(#bge)"/>
+    <g fill="url(#bge)"><rect x="36" y="66" width="22" height="92"/><rect x="82" y="66" width="22" height="92"/><rect x="128" y="66" width="22" height="92"/><rect x="174" y="66" width="22" height="92"/><rect x="220" y="66" width="14" height="92"/></g>
+    <g fill="#CFC3B2"><rect x="58" y="66" width="3" height="92"/><rect x="104" y="66" width="3" height="92"/><rect x="150" y="66" width="3" height="92"/><rect x="196" y="66" width="3" height="92"/></g>
+    <rect x="10" y="158" width="240" height="12" fill="url(#sil)"/>
+    <rect x="0" y="170" width="260" height="12" fill="url(#bge)"/>
+    <circle cx="130" cy="30" r="9" fill="url(#brn)"/>
+  </g>
+  <!-- alumni network -->
+  <g stroke="#E9EBEE" stroke-opacity=".55" stroke-width="1.5" stroke-dasharray="3 5" fill="none">
+    <path d="M60 70 L130 40 L215 62"/><path d="M60 70 L45 140"/><path d="M215 62 L300 36"/><path d="M300 36 L370 70"/>
+  </g>
+  <g fill="url(#lav)" stroke="#F4F1F9" stroke-width="2"><circle cx="60" cy="70" r="10"/><circle cx="130" cy="40" r="8"/><circle cx="215" cy="62" r="9"/><circle cx="300" cy="36" r="8"/><circle cx="45" cy="140" r="8"/></g>
+  <!-- grad cap -->
+  <g transform="translate(398 150) rotate(-12)">
+    <path d="M0 0 L36 -14 L72 0 L36 14Z" fill="url(#brn)"/>
+    <path d="M14 8 v16 q22 12 44 0 v-16 l-22 9Z" fill="#593D31"/>
+    <path d="M72 0 v22" stroke="url(#sil)" stroke-width="3"/><circle cx="72" cy="26" r="4" fill="url(#sil)"/>
+  </g>
+</svg>

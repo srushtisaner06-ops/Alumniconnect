@@ -43,23 +43,23 @@ export default function Campaigns() {
   const mode = camps.data?.mode
   return (
     <>
-      <PageHeader title="Reminder rounds" sub="Personalised links are sent to alumni who have not submitted">
+      <PageHeader eyebrow="Outreach" title="Reminder rounds" sub="Personalised links are sent to alumni who have not submitted" art="/img/art-mail.svg">
         <button className="btn-ghost" onClick={refresh}><RefreshCw className="h-4 w-4" />Refresh</button>
         <button className="btn-primary" onClick={() => setEditing({ ...BLANK })}><Plus className="h-4 w-4" />New round</button>
       </PageHeader>
       {mode && (mode.email === 'simulated' || mode.telegram === 'simulated') && (
-        <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+        <div className="mb-4 border-l-4 border-amber-400 py-1 pl-3 text-sm text-amber-900">
           <strong>Simulated delivery:</strong> {[mode.email === 'simulated' && 'email (SMTP not configured)', mode.telegram === 'simulated' && 'Telegram (bot token not set)'].filter(Boolean).join(' and ')}.
           Reminders are logged but nobody is contacted until you configure the backend environment.
         </div>)}
       <ErrorBox error={camps.error} retry={camps.reload} />
       {camps.loading && !camps.data && <Spinner />}
-      {camps.data?.items.length === 0 && <div className="card p-8 text-center text-sm text-slate-500">No reminder rounds yet. Create one to start sending reminders.</div>}
-      <div className="space-y-4">
+      {camps.data?.items.length === 0 && <div className="card text-center text-sm text-slate-500">No reminder rounds yet. Create one to start sending reminders.</div>}
+      <div className="space-y-10">
         {camps.data?.items.map((c) => (
-          <div key={c.id} className="card p-4">
+          <div key={c.id} className="card">
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <div><div className="flex items-center gap-2"><h2 className="font-medium">{c.name}</h2><Badge tone={tone[c.status]}>{c.status}</Badge></div>
+              <div><div className="flex items-center gap-2"><h2 className="text-2xl font-semibold">{c.name}</h2><Badge tone={tone[c.status]}>{c.status}</Badge></div>
                 <p className="mt-1 text-xs text-slate-500">{c.channel} · every {c.interval_hours} h · max {c.max_attempts} attempts · batch {c.batch_size} · deadline {c.deadline || '—'}</p>
                 <p className="mt-0.5 flex items-center gap-1 text-xs text-slate-500"><Users className="h-3 w-3" />Recipients: {describeRecipients(c.recipients)} · {c.recipient_total ?? 0} {c.recipient_total === 1 ? 'alumnus' : 'alumni'}</p></div>
               <div className="flex flex-wrap gap-2">
@@ -71,17 +71,17 @@ export default function Campaigns() {
               </div>
             </div>
             <dl className="mt-3 grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
-              <div><dt className="text-slate-500">Reminders sent</dt><dd className="font-semibold tabular-nums">{c.sent}</dd></div>
-              <div><dt className="text-slate-500">Failed</dt><dd className="font-semibold tabular-nums">{c.failed}</dd></div>
-              <div><dt className="text-slate-500">Due now</dt><dd className="font-semibold tabular-nums">{c.eligible_now}</dd></div>
-              <div><dt className="text-slate-500">Still reachable</dt><dd className="font-semibold tabular-nums">{c.reachable}</dd></div>
+              <div><dt className="text-slate-500">Reminders sent</dt><dd className="font-display text-2xl font-semibold tabular-nums">{c.sent}</dd></div>
+              <div><dt className="text-slate-500">Failed</dt><dd className="font-display text-2xl font-semibold tabular-nums">{c.failed}</dd></div>
+              <div><dt className="text-slate-500">Due now</dt><dd className="font-display text-2xl font-semibold tabular-nums">{c.eligible_now}</dd></div>
+              <div><dt className="text-slate-500">Still reachable</dt><dd className="font-display text-2xl font-semibold tabular-nums">{c.reachable}</dd></div>
             </dl>
           </div>))}
       </div>
 
-      <div className="card mt-6 overflow-x-auto">
-        <h2 className="border-b border-slate-100 p-4 font-medium">Recent reminder history</h2>
-        <table className="w-full text-left text-sm"><tbody className="divide-y divide-slate-100">
+      <div className="card mt-16 overflow-x-auto">
+        <h2 className="section-title mb-3">Recent reminder history</h2>
+        <table className="w-full text-left text-sm"><tbody className="divide-y divide-sky-200">
           {log.data?.items.length === 0 && <tr><td className="p-6 text-center text-slate-500">Nothing sent yet.</td></tr>}
           {log.data?.items.map((l) => (
             <tr key={l.id}><td className="px-4 py-2">{l.name || '—'}<span className="ml-2 font-mono text-xs text-slate-500">{l.prn}</span></td>
@@ -128,11 +128,11 @@ function RecipientPicker({ sel, setSel, people, setPeople, channel, maxAttempts 
     setQ(''); setHits([])
   }
   const chosen = sel.alumni_ids.map((id) => people.find((p) => p.id === id) || { id, name: `Alumnus #${id}`, prn: '' })
-  const chip = (on) => `rounded-lg border px-3 py-1.5 text-sm font-medium transition ${on ? 'border-blue-800 bg-blue-800 text-white' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`
+  const chip = (on) => `tab ${on ? 'tab-on' : ''}`
   const via = channel === 'email' ? 'email' : channel === 'telegram' ? 'Telegram chat ID' : 'email or Telegram'
 
   return (
-    <fieldset className="rounded-lg border border-slate-200 p-4">
+    <fieldset className="border-0 border-t border-sky-300 pt-5">
 
       <legend className="flex items-center gap-1.5 px-1 text-sm font-medium"><Users className="h-4 w-4" />Who should receive this round?</legend>
 
@@ -145,7 +145,7 @@ function RecipientPicker({ sel, setSel, people, setPeople, channel, maxAttempts 
 
       {
         !sel.all && (
-          <div className="space-y-4">
+          <div className="space-y-10">
             <div>
               <div className="label">By graduation batch <span className="font-normal text-slate-500">(select one or more)</span></div>
               {opts.loading && !opts.data ? <p className="text-sm text-slate-500">Loading…</p> : opts.error ? <ErrorBox error={opts.error} retry={opts.reload} /> : (
@@ -161,7 +161,7 @@ function RecipientPicker({ sel, setSel, people, setPeople, channel, maxAttempts 
               <div className="label">By imported file</div>
               {opts.data && (opts.data.imports.length === 0
                 ? <p className="text-sm text-slate-500">No imports recorded yet. Files imported from now on will be listed here.</p>
-                : <div className="max-h-40 space-y-1 overflow-y-auto rounded-lg border border-slate-100 p-2">
+                : <div className="max-h-40 space-y-1 overflow-y-auto p-1">
                   {opts.data.imports.map((i) => (
                     <label key={i.id} className={`flex items-start gap-2 text-sm ${i.total === 0 ? 'opacity-50' : ''}`}>
                       <input type="checkbox" className="mt-0.5" disabled={i.total === 0} checked={sel.import_ids.includes(i.id)} onChange={() => toggle('import_ids', i.id)} />
@@ -178,7 +178,7 @@ function RecipientPicker({ sel, setSel, people, setPeople, channel, maxAttempts 
                 <input id="rsearch" className="input pl-9" placeholder="Search by name, PRN or email (2+ characters)" value={q} onChange={(e) => setQ(e.target.value)} autoComplete="off" />
               </div>
               {hits.length > 0 && (
-                <ul className="mt-1 max-h-44 divide-y divide-slate-100 overflow-y-auto rounded-lg border border-slate-200 bg-white text-sm">
+                <ul className="mt-1 max-h-44 divide-y divide-sky-200 overflow-y-auto rounded-2xl bg-white text-sm shadow-xl shadow-blue-900/10">
                   {hits.map((p) => (
                     <li key={p.id}><button type="button" className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left hover:bg-blue-50 disabled:opacity-50"
                       disabled={sel.alumni_ids.includes(p.id)} onClick={() => add(p)}>
@@ -197,7 +197,7 @@ function RecipientPicker({ sel, setSel, people, setPeople, channel, maxAttempts 
           </div>)
       }
 
-      <div className="mt-4 rounded-lg bg-slate-50 p-3 text-sm" aria-live="polite">
+      <div className="mt-4 border-t border-sky-300 pt-3 text-sm" aria-live="polite">
         <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Recipient preview</div>
         {empty ? <p className="mt-1 text-slate-600">Select at least one batch, file or individual, or choose Everyone.</p>
           : pvErr ? <div className="mt-1"><ErrorBox error={pvErr} /></div>
@@ -238,9 +238,9 @@ function Editor({ initial, placeholders, onClose, onSaved }) {
   }
   const chips = placeholders.map((p) => <code key={p} className="rounded bg-slate-100 px-1.5 py-0.5 text-xs">{`{{${p}}}`}</code>)
   return (
-    <div className="fixed inset-0 z-40 flex items-start justify-center overflow-y-auto bg-slate-900/40 p-4" onClick={onClose}>
-      <form onSubmit={save} onClick={(e) => e.stopPropagation()} className="card my-8 w-full max-w-2xl space-y-4 p-5" role="dialog" aria-label="Reminder round">
-        <h2 className="text-lg font-semibold">{f.id ? 'Edit round' : 'New round'}</h2>
+    <div className="fixed inset-0 z-40 flex items-start justify-center overflow-y-auto bg-blue-900/40 p-4 backdrop-blur-sm" onClick={onClose}>
+      <form onSubmit={save} onClick={(e) => e.stopPropagation()} className="sheet my-8 w-full max-w-2xl space-y-5 p-8" role="dialog" aria-label="Reminder round">
+        <h2 className="text-3xl font-semibold">{f.id ? 'Edit round' : 'New round'}</h2>
         <ErrorBox error={err} />
         <div><label className="label" htmlFor="n">Name</label><input id="n" required className="input" value={f.name} onChange={set('name')} /></div>
         <div className="grid gap-3 sm:grid-cols-4">
@@ -257,7 +257,7 @@ function Editor({ initial, placeholders, onClose, onSaved }) {
           <div><label className="label" htmlFor="es">Email subject</label><input id="es" className="input" value={f.email_subject} onChange={set('email_subject')} /></div>
           <div><label className="label" htmlFor="eb">Email body</label><textarea id="eb" rows={7} className="input font-mono" value={f.email_body} onChange={set('email_body')} /></div></>}
         {f.channel !== 'email' && <div><label className="label" htmlFor="tb">Telegram message</label><textarea id="tb" rows={3} className="input font-mono" value={f.telegram_body} onChange={set('telegram_body')} /></div>}
-        <details className="rounded-lg bg-slate-50 p-3 text-sm"><summary className="cursor-pointer font-medium">Preview with sample data</summary>
+        <details className="border-t border-sky-300 pt-3 text-sm"><summary className="cursor-pointer font-medium">Preview with sample data</summary>
           <pre className="mt-2 whitespace-pre-wrap font-sans text-slate-700">{f.channel !== 'telegram' ? preview(f.email_subject) + '\n\n' + preview(f.email_body) : preview(f.telegram_body)}</pre></details>
         <div className="flex justify-end gap-2"><button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
           <button className="btn-primary" disabled={busy}>{busy && <Loader2 className="h-4 w-4 animate-spin" />}Save</button></div>

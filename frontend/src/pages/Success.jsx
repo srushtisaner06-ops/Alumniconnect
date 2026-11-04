@@ -1,13 +1,12 @@
 import React from 'react'
-import { CheckCircle2 } from 'lucide-react'
 export default function Success() {
   return (
-    <div className="flex min-h-screen items-center justify-center p-4">
-      <div className="card max-w-md p-8 text-center">
-        <CheckCircle2 className="mx-auto h-12 w-12 text-emerald-600" />
-        <h1 className="mt-4 text-xl font-semibold">Thank you!</h1>
-        <p className="mt-2 text-sm text-slate-600">Your details have been recorded and you will not receive further reminders. You can reopen your personal link at any time to update them.</p>
-      </div>
+    <div className="flex min-h-screen flex-col items-center justify-center px-6 text-center">
+      <img src="/img/success.svg" alt="" className="h-56 w-auto drop-shadow-xl" />
+      <span className="silver-chip mt-6">All done</span>
+      <h1 className="mt-4 text-5xl font-semibold text-slate-900">Thank you!</h1>
+      <div className="silver-bar mt-5 w-28" />
+      <p className="mt-5 max-w-md text-base leading-7 text-slate-600">Your details have been recorded and you will not receive further reminders. You can reopen your personal link at any time to update them.</p>
     </div>
   )
 }

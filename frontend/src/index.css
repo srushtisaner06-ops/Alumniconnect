@@ -3,21 +3,68 @@
 @tailwind utilities;
 
 @layer base {
-  html { color-scheme: light; }
-  body { @apply bg-slate-50 text-slate-800 antialiased; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  html { color-scheme: light; overflow-x: hidden; }
+  body {
+    @apply text-slate-800 antialiased;
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background-color: #F7F0E5;
+    background-image:
+      radial-gradient(1000px 520px at 100% 0%, rgba(170, 156, 203, 0.20), transparent 62%),
+      radial-gradient(800px 520px at 0% 100%, rgba(196, 200, 206, 0.38), transparent 62%);
+    background-attachment: fixed;
+    overflow-x: hidden;
+  }
+  h1, h2, h3 { font-family: Fraunces, Georgia, Cambria, "Times New Roman", serif; letter-spacing: -0.015em; }
   button, input, select, textarea { font: inherit; }
-  button:focus-visible, a:focus-visible { @apply outline-none ring-2 ring-blue-500 ring-offset-2; }
-  ::selection { @apply bg-blue-100 text-blue-900; }
+  button:focus-visible, a:focus-visible { @apply outline-none ring-2 ring-indigo-400 ring-offset-2 ring-offset-slate-50; }
+  ::selection { @apply bg-indigo-200 text-slate-900; }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-thumb { background: #CFC3B2; border-radius: 999px; border: 2px solid #F7F0E5; }
+  ::-webkit-scrollbar-thumb:hover { background: #B7A9D0; }
 }
 
 @layer components {
-  .input { @apply w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-800 shadow-sm placeholder:text-slate-400 transition focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-100; }
-  .btn { @apply inline-flex items-center justify-center gap-2 rounded-lg px-3.5 py-2.5 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50; }
-  .btn-primary { @apply btn bg-blue-800 text-white shadow-sm hover:bg-blue-900; }
-  .btn-ghost { @apply btn border border-slate-300 bg-white text-slate-700 shadow-sm hover:border-slate-400 hover:bg-slate-50; }
-  .btn-danger { @apply btn border border-red-200 bg-white text-red-700 hover:bg-red-50; }
-  .card { @apply rounded-xl border border-slate-200 bg-white shadow-sm shadow-slate-200/40; }
-  .label { @apply mb-1.5 block text-sm font-semibold text-slate-700; }
-  .section-title { @apply text-base font-semibold tracking-tight text-slate-900; }
+  /* ---------- open, box-free building blocks ---------- */
+  .full-bleed { width: 100vw; position: relative; left: 50%; margin-left: -50vw; }
+  .hero-band {
+    background-image:
+      radial-gradient(520px 300px at 88% 40%, rgba(170, 156, 203, 0.30), transparent 70%),
+      radial-gradient(420px 260px at 8% 100%, rgba(196, 200, 206, 0.55), transparent 70%),
+      linear-gradient(180deg, rgba(247, 240, 229, 0) 0%, rgba(234, 223, 203, 0.75) 100%);
+  }
+  .silver-bg { background-image: linear-gradient(135deg, #F7F8FA 0%, #C4C8CE 45%, #EEF0F2 70%, #AAAFB7 100%); }
+  .silver-bar { height: 3px; background-image: linear-gradient(90deg, rgba(233,235,238,0), #C4C8CE 12%, #8A909A 40%, #F7F8FA 55%, #AEB3BB 80%, rgba(233,235,238,0)); }
+  .silver-rule { height: 1px; background-image: linear-gradient(90deg, #AEB3BB, rgba(174,179,187,0)); }
+  .silver-chip { @apply inline-flex items-center rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-700; background-image: linear-gradient(135deg, #F7F8FA, #CDD1D6); }
+
+  .card { @apply relative pt-6; }
+  .card::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 1px; background-image: linear-gradient(90deg, #AEB3BB, rgba(174,179,187,0.15)); }
+  .sheet { @apply rounded-[28px] bg-slate-50 shadow-2xl shadow-blue-900/25; }
+  .section-title { @apply text-xl font-semibold tracking-tight text-slate-900; }
   .muted { @apply text-sm text-slate-500; }
+  .label { @apply mb-1 block text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500; }
+
+  /* underline fields instead of boxed inputs */
+  .input { @apply w-full rounded-none border-0 border-b border-slate-300 bg-transparent px-1 py-2.5 text-[15px] text-slate-800 placeholder:text-slate-400 transition focus:border-indigo-500 focus:outline-none focus:ring-0; }
+  .input:focus { box-shadow: 0 1px 0 0 #9283B6; }
+  select.input { @apply pr-6; }
+
+  /* pill buttons */
+  .btn { @apply inline-flex items-center justify-center gap-2 rounded-full px-5 py-2.5 text-sm font-semibold transition duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50; }
+  .btn-primary { @apply btn text-white shadow-lg shadow-blue-900/20 hover:-translate-y-px active:translate-y-0; background-image: linear-gradient(135deg, #8A6249 0%, #5A3E31 100%); }
+  .btn-primary:hover { background-image: linear-gradient(135deg, #9A7156 0%, #684536 100%); }
+  .btn-ghost { @apply btn text-slate-800 hover:-translate-y-px hover:text-indigo-800; background-image: linear-gradient(135deg, #FAFBFC, #D3D7DC); box-shadow: 0 1px 2px rgba(70,75,84,.18); }
+  .btn-danger { @apply btn text-red-700 hover:bg-red-50; }
+
+  /* text tabs / filters */
+  .tab { @apply mx-1.5 border-b-2 border-transparent px-0.5 pb-1 text-sm font-medium text-slate-500 transition hover:border-sky-300 hover:text-indigo-800; }
+  .tab-on { @apply border-indigo-500 text-slate-900; }
 }
+
+/* tables: open rows, hairlines only */
+thead { background: none !important; }
+thead th { color: #7E6D60 !important; border-bottom: 1px solid #C4C8CE; }
+tbody tr { transition: background-color .15s; }
+tbody tr:hover { background-color: rgba(190, 177, 216, 0.16); }
+
+.silver-mark { height: 3px; border-radius: 999px; background-image: linear-gradient(90deg, #8A909A, #E3E6EA 45%, #AEB3BB); }

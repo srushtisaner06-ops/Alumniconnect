@@ -50,16 +50,16 @@ export default function Import() {
 
   return (
     <>
-      <PageHeader title="Import records" sub="Upload a Placement (4.6.1), Higher Studies (4.6.2) or Entrepreneurship (4.6.3) sheet in the reference format">
+      <PageHeader eyebrow="Data import" art="/img/art-upload.svg" title="Import records" sub="Upload a Placement (4.6.1), Higher Studies (4.6.2) or Entrepreneurship (4.6.3) sheet in the reference format">
         {CATEGORY_KEYS.map((k) => (
           <button key={k} className="btn-ghost" onClick={() => download(`/import/template?category=${k}`, FILE_NAMES[k]).catch((e) => toast(e.message, 'err'))}>
             <Download className="h-4 w-4" />{CATEGORIES[k].label} template</button>))}
       </PageHeader>
-      <div className="card p-5">
-        <div className="grid gap-4 sm:grid-cols-[1fr_200px_220px]">
+      <div className="card">
+        <div className="grid gap-8 sm:grid-cols-[1fr_200px_220px]">
           <div>
             <label className="label" htmlFor="file">File (.xlsx or .csv)</label>
-            <div className="flex items-center gap-3 rounded-lg border-2 border-dashed border-slate-300 p-4">
+            <div className="flex items-center gap-3 border-0 border-b-2 border-dashed border-sky-400 pb-3">
               <FileSpreadsheet className="h-8 w-8 text-slate-400" />
               <div className="min-w-0 flex-1 truncate text-sm">{file ? file.name : 'No file chosen'}</div>
               <input id="file" ref={inputRef} type="file" accept=".xlsx,.xlsm,.csv" className="sr-only" onChange={(e) => { const f = e.target.files[0]; setFile(f); validate(f) }} />
@@ -84,9 +84,9 @@ export default function Import() {
       {busy && <p className="mt-4 flex items-center gap-2 text-sm text-slate-500"><Loader2 className="h-4 w-4 animate-spin" />Checking file…</p>}
 
       {!rep && !busy && formats.data && (
-        <div className="mt-4 grid gap-4 lg:grid-cols-3">
+        <div className="mt-14 grid gap-x-12 gap-y-10 lg:grid-cols-3">
           {formats.data.formats.map((f) => (
-            <div key={f.category} className="card p-4">
+            <div key={f.category} className="card">
               <h2 className="mb-1 flex items-center gap-2 text-sm font-medium">{f.table}<Badge tone={CATEGORIES[f.category].tone}>{f.label}</Badge></h2>
               <p className="mb-2 text-xs text-slate-500">Expected columns, in any order:</p>
               <ol className="list-decimal space-y-0.5 pl-5 text-xs text-slate-700">{f.columns.map((c) => <li key={c}>{c}</li>)}</ol>
@@ -94,8 +94,8 @@ export default function Import() {
         </div>)}
 
       {rep && (
-        <div className="mt-4 space-y-4">
-          <div className="card p-5">
+        <div className="mt-10 space-y-10">
+          <div className="card">
             <h2 className="mb-3 flex flex-wrap items-center gap-2 font-medium">Format check
               {cat && <Badge tone={cat.tone}>{rep.detected ? 'Detected' : 'Selected'}: {cat.label}</Badge>}
               {rep.missing_columns.length === 0 ? <Badge tone="green">Matches reference</Badge> : <Badge tone="red">Does not match</Badge>}</h2>
@@ -111,28 +111,28 @@ export default function Import() {
           {rep.summary && (
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
               {[['Rows read', rep.summary.rows], ['Valid rows', rep.summary.valid_rows], ['Unique students', rep.summary.unique_students], ['Already in system', rep.already_in_database ?? 0], ['Graduation year', rep.graduation_year ?? '—']].map(([l, v]) => (
-                <div key={l} className="card p-3"><div className="text-xs text-slate-500">{l}</div><div className="text-xl font-semibold tabular-nums">{v}</div></div>))}
+                <div key={l} className="card"><div className="text-xs text-slate-500">{l}</div><div className="text-xl font-semibold tabular-nums">{v}</div></div>))}
             </div>)}
 
           {rep.errors.length > 0 && (
-            <div className="card border-red-200 p-5">
+            <div className="card">
               <h2 className="mb-2 flex items-center gap-2 font-medium text-red-700"><XCircle className="h-4 w-4" />{rep.errors.length} problem{rep.errors.length > 1 ? 's' : ''} found</h2>
               <div className="max-h-64 overflow-y-auto"><table className="w-full text-left text-sm"><thead className="text-xs text-slate-500"><tr><th className="py-1 pr-3">Row</th><th className="pr-3">Column</th><th>Problem</th></tr></thead>
-                <tbody>{rep.errors.slice(0, 100).map((e, i) => <tr key={i} className="border-t border-slate-100"><td className="py-1 pr-3 tabular-nums">{e.row ?? '—'}</td><td className="pr-3">{e.column ?? '—'}</td><td>{e.message}</td></tr>)}</tbody></table></div>
+                <tbody>{rep.errors.slice(0, 100).map((e, i) => <tr key={i} className="border-t border-sky-200"><td className="py-1 pr-3 tabular-nums">{e.row ?? '—'}</td><td className="pr-3">{e.column ?? '—'}</td><td>{e.message}</td></tr>)}</tbody></table></div>
               {rep.errors.length > 100 && <p className="mt-2 text-xs text-slate-500">Showing first 100.</p>}
             </div>)}
 
           {rep.warnings.length > 0 && (
-            <div className="card border-amber-200 p-5">
+            <div className="card">
               <h2 className="mb-2 flex items-center gap-2 font-medium text-amber-700"><AlertTriangle className="h-4 w-4" />{rep.warnings.length} note{rep.warnings.length > 1 ? 's' : ''} (not blocking)</h2>
               <ul className="max-h-40 space-y-1 overflow-y-auto text-sm text-slate-700">{rep.warnings.map((w, i) => <li key={i}>{w.row ? `Row ${w.row}: ` : ''}{w.message}</li>)}</ul>
             </div>)}
 
           {rep.preview?.length > 0 && (
-            <div className="card overflow-x-auto p-5"><h2 className="mb-2 font-medium">Preview</h2>
-              <table className="w-full text-left text-sm"><tbody>{rep.preview.map((p) => <tr key={p.prn} className="border-t border-slate-100"><td className="py-1 pr-3 font-mono text-xs">{p.prn}</td><td className="pr-3">{p.name}</td><td className="pr-3 text-slate-500">{p.details}</td></tr>)}</tbody></table></div>)}
+            <div className="card overflow-x-auto"><h2 className="mb-2 font-medium">Preview</h2>
+              <table className="w-full text-left text-sm"><tbody>{rep.preview.map((p) => <tr key={p.prn} className="border-t border-sky-200"><td className="py-1 pr-3 font-mono text-xs">{p.prn}</td><td className="pr-3">{p.name}</td><td className="pr-3 text-slate-500">{p.details}</td></tr>)}</tbody></table></div>)}
 
-          <div className="card space-y-3 p-5">
+          <div className="card space-y-3">
             {hasRowErrors && <label className="flex items-start gap-2 text-sm"><input type="checkbox" className="mt-0.5" checked={skip} onChange={(e) => setSkip(e.target.checked)} />
               <span>Skip the invalid rows and import the valid ones. <span className="text-slate-500">Without this, the whole file is rejected.</span></span></label>}
             <label className="flex items-start gap-2 text-sm"><input type="checkbox" className="mt-0.5" checked={replace} onChange={(e) => setReplace(e.target.checked)} />

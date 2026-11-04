@@ -1,0 +1,24 @@
+<svg viewBox="0 0 560 220" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Alumni network illustration">
+  <defs>
+    <linearGradient id="s" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FAFBFC"/><stop offset=".5" stop-color="#B9BEC6"/><stop offset="1" stop-color="#E8EAEE"/></linearGradient>
+    <linearGradient id="l" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#C9BEE0"/><stop offset="1" stop-color="#7C6CA2"/></linearGradient>
+    <linearGradient id="b" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#A98162"/><stop offset="1" stop-color="#593D31"/></linearGradient>
+  </defs>
+  <circle cx="480" cy="80" r="62" fill="#D5CBE7" opacity=".3"/>
+  <circle cx="95" cy="165" r="50" fill="#D4D8DD" opacity=".35"/>
+  <!-- central hub -->
+  <g stroke="#BCC1C8" stroke-width="2" stroke-dasharray="4 6" fill="none">
+    <path d="M280 110 L150 55"/><path d="M280 110 L130 150"/><path d="M280 110 L430 50"/><path d="M280 110 L450 160"/><path d="M280 110 L280 30"/><path d="M280 110 L360 190"/>
+  </g>
+  <circle cx="280" cy="110" r="42" fill="url(#s)" stroke="#fff" stroke-width="4"/>
+  <g transform="translate(250 100)"><path d="M0 0 L30 -12 L60 0 L30 12Z" fill="url(#b)"/><path d="M12 7 v13 q18 10 36 0 v-13 l-18 7Z" fill="#45302A"/><path d="M60 0 v18" stroke="#7C6CA2" stroke-width="3"/><circle cx="60" cy="21" r="3.5" fill="#7C6CA2"/></g>
+  <!-- people nodes -->
+  <g>
+    <g transform="translate(150 55)"><circle r="24" fill="url(#l)" stroke="#fff" stroke-width="3"/><circle cy="-6" r="7" fill="#F4F1F9"/><path d="M-12 14 q12 -14 24 0z" fill="#F4F1F9"/></g>
+    <g transform="translate(130 150)"><circle r="20" fill="url(#b)" stroke="#fff" stroke-width="3"/><circle cy="-5" r="6" fill="#F8F1EA"/><path d="M-10 12 q10 -12 20 0z" fill="#F8F1EA"/></g>
+    <g transform="translate(430 50)"><circle r="22" fill="url(#s)" stroke="#fff" stroke-width="3"/><circle cy="-5" r="6.5" fill="#7C5740"/><path d="M-11 13 q11 -13 22 0z" fill="#7C5740"/></g>
+    <g transform="translate(450 160)"><circle r="25" fill="url(#l)" stroke="#fff" stroke-width="3"/><circle cy="-6" r="7" fill="#F4F1F9"/><path d="M-12 15 q12 -14 24 0z" fill="#F4F1F9"/></g>
+    <g transform="translate(280 30)"><circle r="16" fill="url(#b)" stroke="#fff" stroke-width="3"/><circle cy="-4" r="5" fill="#F8F1EA"/><path d="M-8 9 q8 -10 16 0z" fill="#F8F1EA"/></g>
+    <g transform="translate(360 190)"><circle r="18" fill="url(#s)" stroke="#fff" stroke-width="3"/><circle cy="-4" r="5.5" fill="#7C5740"/><path d="M-9 11 q9 -11 18 0z" fill="#7C5740"/></g>
+  </g>
+</svg>

@@ -8,7 +8,7 @@ export const Spinner = ({ label = 'Loading…' }) => (
 )
 
 export const ErrorBox = ({ error, retry }) => error ? (
-  <div className="flex items-start gap-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800" role="alert">
+  <div className="my-3 flex items-start gap-3 border-l-4 border-red-400 py-1 pl-3 text-sm text-red-800" role="alert">
     <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
     <div className="flex-1">{String(error.message || error)}</div>
     {retry && <button className="font-medium underline" onClick={retry}>Retry</button>}
@@ -16,42 +16,51 @@ export const ErrorBox = ({ error, retry }) => error ? (
 ) : null
 
 const tones = {
-  green: 'bg-emerald-50 text-emerald-700 ring-emerald-200', amber: 'bg-amber-50 text-amber-700 ring-amber-200',
-  red: 'bg-red-50 text-red-700 ring-red-200', slate: 'bg-slate-100 text-slate-600 ring-slate-200',
-  indigo: 'bg-indigo-50 text-indigo-700 ring-indigo-200', blue: 'bg-sky-50 text-sky-700 ring-sky-200',
+  green: 'bg-emerald-100/70 text-emerald-800', amber: 'bg-amber-100/80 text-amber-800',
+  red: 'bg-red-100/80 text-red-700', slate: 'bg-slate-200/60 text-slate-600',
+  indigo: 'bg-indigo-100 text-indigo-800', blue: 'bg-sky-100 text-sky-800',
 }
+const iconTones = { green: 'text-emerald-600', amber: 'text-amber-600', red: 'text-red-600', slate: 'text-slate-500', indigo: 'text-indigo-600', blue: 'text-sky-700' }
 export const Badge = ({ tone = 'slate', children }) => (
-  <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset ${tones[tone]}`}>{children}</span>
+  <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${tones[tone]}`}>{children}</span>
 )
 
 export const StatusBadge = ({ a }) =>
   a.status === 'COMPLETED' ? <Badge tone="green">Completed</Badge>
   : a.overdue ? <Badge tone="red">Overdue</Badge> : <Badge tone="amber">Pending</Badge>
 
+// A statistic: big serif numeral set against a thin silver rule. No box.
 export const Stat = ({ icon: Icon, label, value, sub, tone = 'indigo' }) => (
-  <div className="card p-4">
-    <div className="flex items-center gap-3">
-      <div className={`rounded-lg p-2 ring-1 ring-inset ${tones[tone]}`}><Icon className="h-5 w-5" /></div>
-      <div className="min-w-0">
-        <div className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</div>
-        <div className="text-2xl font-semibold tabular-nums">{value}</div>
-      </div>
+  <div className="relative pt-5">
+    <div className="silver-rule absolute inset-x-0 top-0" />
+    <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+      <Icon className={`h-4 w-4 ${iconTones[tone]}`} />{label}
     </div>
+    <div className="mt-2 font-display text-5xl font-semibold tabular-nums leading-none text-slate-900">{value}</div>
     {sub && <div className="mt-2 text-xs text-slate-500">{sub}</div>}
   </div>
 )
 
-export const Progress = ({ value, tone = 'bg-indigo-600' }) => (
-  <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100" role="progressbar" aria-valuenow={Math.round(value)} aria-valuemin={0} aria-valuemax={100}>
+export const Progress = ({ value, tone = 'bg-gradient-to-r from-indigo-400 to-blue-700' }) => (
+  <div className="silver-bg h-2 w-full overflow-hidden rounded-full opacity-90" role="progressbar" aria-valuenow={Math.round(value)} aria-valuemin={0} aria-valuemax={100}>
     <div className={`h-full rounded-full ${tone}`} style={{ width: `${Math.min(100, value)}%` }} />
   </div>
 )
 
-export const PageHeader = ({ title, sub, children }) => (
-  <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
-    <div><h1 className="text-2xl font-semibold">{title}</h1>{sub && <p className="mt-1 text-sm text-slate-500">{sub}</p>}</div>
-    <div className="flex flex-wrap gap-2">{children}</div>
-  </div>
+// Full-width hero band: big title, supporting text, actions and an illustration.
+export const PageHeader = ({ title, sub, children, art, eyebrow }) => (
+  <section className="full-bleed hero-band mb-12">
+    <div className="mx-auto flex max-w-6xl flex-col items-center gap-6 px-5 py-10 sm:px-8 md:flex-row md:py-14">
+      <div className="min-w-0 flex-1">
+        {eyebrow && <span className="silver-chip">{eyebrow}</span>}
+        <h1 className="mt-3 text-4xl font-semibold leading-[1.08] text-slate-900 sm:text-5xl">{title}</h1>
+        {sub && <p className="mt-4 max-w-xl text-base leading-7 text-slate-600">{sub}</p>}
+        {children && <div className="mt-7 flex flex-wrap items-center gap-3">{children}</div>}
+      </div>
+      {art && <img src={art} alt="" className="w-full max-w-sm select-none drop-shadow-xl md:w-[40%] md:max-w-md" />}
+    </div>
+    <div className="silver-bar" />
+  </section>
 )
 
 // ---- toasts
@@ -67,12 +76,12 @@ export function ToastProvider({ children }) {
   return (
     <ToastCtx.Provider value={push}>
       {children}
-      <div className="fixed bottom-4 right-4 z-50 flex w-80 max-w-[calc(100vw-2rem)] flex-col gap-2" aria-live="polite">
+      <div className="fixed bottom-5 right-5 z-50 flex w-80 max-w-[calc(100vw-2.5rem)] flex-col gap-2" aria-live="polite">
         {items.map((i) => (
-          <div key={i.id} className={`flex items-start gap-2 rounded-lg border bg-white p-3 text-sm shadow-lg ${i.kind === 'ok' ? 'border-emerald-200' : 'border-red-200'}`}>
-            {i.kind === 'ok' ? <CheckCircle2 className="h-4 w-4 text-emerald-600" /> : <AlertCircle className="h-4 w-4 text-red-600" />}
+          <div key={i.id} className={`flex items-start gap-2 rounded-full px-5 py-3 text-sm text-white shadow-2xl ${i.kind === 'ok' ? 'bg-blue-900' : 'bg-red-800'}`}>
+            {i.kind === 'ok' ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-indigo-200" /> : <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />}
             <span className="flex-1">{i.msg}</span>
-            <button onClick={() => setItems((x) => x.filter((t) => t.id !== i.id))} aria-label="Dismiss"><X className="h-4 w-4 text-slate-400" /></button>
+            <button onClick={() => setItems((x) => x.filter((t) => t.id !== i.id))} aria-label="Dismiss"><X className="h-4 w-4 opacity-70" /></button>
           </div>
         ))}
       </div>
