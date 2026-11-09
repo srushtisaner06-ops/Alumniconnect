@@ -1,6 +1,6 @@
 import sqlite3
 from contextlib import contextmanager
-from . import config
+from . import config, migrations, rbac
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users(
@@ -98,3 +98,6 @@ def init():
         # Databases created before the three-category change: add the column that records each file's type.
         if "category" not in {r["name"] for r in c.execute("PRAGMA table_info(import_batches)")}:
             c.execute("ALTER TABLE import_batches ADD COLUMN category TEXT NOT NULL DEFAULT 'PLACEMENT'")
+        # Everything added after the original schema is a numbered, recorded migration (see migrations.py).
+        migrations.run(c)
+        rbac.sync(c)

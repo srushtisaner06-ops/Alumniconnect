@@ -2,7 +2,7 @@ import json
 import statistics
 from datetime import datetime, timedelta, timezone
 
-from . import engine, notifier
+from . import config, engine, notifier
 from .db import db
 from .security import new_token
 
@@ -19,6 +19,47 @@ def parse_ts(s):
     return datetime.strptime(s, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc) if s else None
 
 
+# ---------------------------------------------------------------- personal link (token) lifecycle
+# A link is "active" until it expires or staff revoke it. Sending a reminder renews it (rolling expiry), so a
+# person who keeps being reminded keeps a working link, while a link nobody uses dies on its own.
+def token_expiry(from_dt=None):
+    return iso((from_dt or now()) + timedelta(days=config.TOKEN_TTL_DAYS))
+
+
+def token_state(row, at=None):
+    """'active' | 'expired' | 'revoked'. A missing expiry counts as expired (fail closed)."""
+    if row["token_revoked_at"]:
+        return "revoked"
+    exp = row["token_expires_at"]
+    if not exp or exp <= iso(at or now()):
+        return "expired"
+    return "active"
+
+
+def lookup_token(c, token):
+    """(row, state) for a personal-link token, or (None, None) if no such token exists."""
+    r = c.execute("SELECT * FROM alumni WHERE token=?", (token,)).fetchone() if token else None
+    return (r, token_state(r)) if r else (None, None)
+
+
+def regenerate_token(c, aid):
+    """Replace the link: the old one stops working immediately. Returns the new token."""
+    tok = new_token()
+    c.execute("UPDATE alumni SET token=?, token_issued_at=?, token_expires_at=?, token_revoked_at=NULL WHERE id=?",
+              (tok, iso(now()), token_expiry(), aid))
+    return tok
+
+
+def revoke_token(c, aid):
+    """Disable the link without issuing a new one. The person is left out of reminders until a new link is generated."""
+    c.execute("UPDATE alumni SET token_revoked_at=? WHERE id=? AND token_revoked_at IS NULL", (iso(now()), aid))
+
+
+def extend_token(c, aid):
+    c.execute("UPDATE alumni SET token_expires_at=? WHERE id=? AND token_revoked_at IS NULL AND (token_expires_at IS NULL OR token_expires_at<?)",
+              (token_expiry(), aid, token_expiry()))
+
+
 # ---------------------------------------------------------------- alumni
 def overdue_cutoff(c):
     r = c.execute("SELECT MIN(deadline) d FROM campaigns WHERE deadline IS NOT NULL AND status!='DRAFT'").fetchone()
@@ -33,6 +74,7 @@ def alumnus_dict(c, row, with_offers=True):
     d["details"] = json.loads(d["details"]) if d.get("details") else None
     cutoff = overdue_cutoff(c)
     d["overdue"] = bool(cutoff and d["status"] == "PENDING" and cutoff < now().strftime("%Y-%m-%d"))
+    d["link_status"] = token_state(row)
     if with_offers:
         d["offers"] = [dict(o) for o in c.execute("SELECT * FROM offers WHERE alumni_id=? ORDER BY package_lpa DESC", (d["id"],))]
         d["best_package"] = max([o["package_lpa"] or 0 for o in d["offers"]], default=0)
@@ -59,8 +101,10 @@ def import_students(c, students, graduation_year, replace=False, final_year_stud
                       (s["name"], s["class_div"], s["phone"], s["email"], s["sr_no"], graduation_year, tg, aid))
             updated += 1
         else:
-            aid = c.execute("INSERT INTO alumni(sr_no,name,prn,class_div,phone,email,telegram_chat_id,graduation_year,token) VALUES(?,?,?,?,?,?,?,?,?)",
-                            (s["sr_no"], s["name"], s["prn"], s["class_div"], s["phone"], s["email"], tg, graduation_year, new_token())).lastrowid
+            aid = c.execute("INSERT INTO alumni(sr_no,name,prn,class_div,phone,email,telegram_chat_id,graduation_year,token,token_issued_at,token_expires_at) "
+                            "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                            (s["sr_no"], s["name"], s["prn"], s["class_div"], s["phone"], s["email"], tg, graduation_year, new_token(),
+                             iso(now()), token_expiry())).lastrowid
             added += 1
         if import_id:   # remember which file this alumnus came from (an alumnus can belong to several files)
             c.execute("INSERT OR IGNORE INTO import_batch_alumni(import_id,alumni_id) VALUES(?,?)", (import_id, aid))
@@ -110,13 +154,20 @@ def snapshot(c, aid):
     snap = {"alumni": dict(a)}
     for table in CATEGORY_TABLES.values():
         snap[table] = [dict(o) for o in c.execute(f"SELECT * FROM {table} WHERE alumni_id=?", (aid,))]
+    v = c.execute("SELECT level FROM profile_visibility WHERE alumni_id=?", (aid,)).fetchone()
+    snap["visibility"] = v["level"] if v else None
     return snap
 
 
 def restore(c, snap):
-    a = snap["alumni"]
+    a = dict(snap["alumni"])
+    if not a.get("token_expires_at"):             # snapshot taken before links expired: give it a fresh, finite life
+        a["token_issued_at"], a["token_expires_at"], a["token_revoked_at"] = iso(now()), token_expiry(), None
     cols = list(a.keys())
     c.execute(f"INSERT INTO alumni({','.join(cols)}) VALUES({','.join('?' * len(cols))})", [a[k] for k in cols])
+    if snap.get("visibility"):                     # restore the person's privacy choice (default stays PRIVATE)
+        c.execute("INSERT OR REPLACE INTO profile_visibility(alumni_id,level,updated_at,updated_by) VALUES(?,?,?,?)",
+                  (a["id"], snap["visibility"], iso(now()), "undo"))
     for table in CATEGORY_TABLES.values():          # older undo entries only hold "offers"
         for o in snap.get(table, []):
             oc = list(o.keys())
@@ -268,7 +319,8 @@ def eligible(c, camp):
     t = now()
     out = []
     sel = campaign_recipient_ids(c, camp["id"])      # None = everyone (legacy campaigns)
-    for a in c.execute("SELECT * FROM alumni WHERE status='PENDING' AND unsubscribed=0 AND reminders_sent<?", (camp["max_attempts"],)).fetchall():
+    for a in c.execute("SELECT * FROM alumni WHERE status='PENDING' AND unsubscribed=0 AND token_revoked_at IS NULL AND reminders_sent<?",
+                       (camp["max_attempts"],)).fetchall():
         if sel is not None and a["id"] not in sel:
             continue
         last = parse_ts(a["last_reminder_at"])
@@ -298,7 +350,8 @@ def eligible_total(c, camp):
     """Alumni who could still be reminded now or later (ignores the interval)."""
     n = 0
     sel = campaign_recipient_ids(c, camp["id"])
-    for a in c.execute("SELECT * FROM alumni WHERE status='PENDING' AND unsubscribed=0 AND reminders_sent<?", (camp["max_attempts"],)).fetchall():
+    for a in c.execute("SELECT * FROM alumni WHERE status='PENDING' AND unsubscribed=0 AND token_revoked_at IS NULL AND reminders_sent<?",
+                       (camp["max_attempts"],)).fetchall():
         if sel is not None and a["id"] not in sel:
             continue
         if _channels(camp, a):
@@ -326,6 +379,7 @@ def run_campaign(camp_id):
                           (camp_id, aid, "-", "SKIPPED", 0, "completed or unsubscribed"))
                 result["skipped"] += 1
                 continue
+            extend_token(c, aid)                                   # the link in this message must still work when it arrives
             a = dict(by_id[aid])
             attempt = fresh["reminders_sent"] + 1
             chans, outcomes = _channels(camp, a), []
@@ -387,7 +441,9 @@ def poll_telegram():
             if chat.get("type") != "private" or not parts or not parts[0].startswith("/start"):
                 continue
             token = parts[1].strip() if len(parts) > 1 else ""
-            a = c.execute("SELECT id,name FROM alumni WHERE token=?", (token,)).fetchone() if token else None
+            a, state = lookup_token(c, token)
+            if state != "active":
+                a = None
             chat_id = str(chat["id"])
             if a:
                 c.execute("UPDATE alumni SET telegram_chat_id=? WHERE id=?", (chat_id, a["id"]))

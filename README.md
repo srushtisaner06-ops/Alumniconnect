@@ -19,7 +19,7 @@ cd backend && pip install -r requirements.txt && uvicorn app.main:app --port 800
 cd frontend && npm install && npm run dev        # http://localhost:5173
 ```
 
-Sign in with `ADMIN_EMAIL` / `ADMIN_PASSWORD` (defaults `admin@vit.edu` / `ChangeMe@123`; **change them**, see `backend/.env.example`).
+Sign in with `ADMIN_EMAIL` / `ADMIN_PASSWORD` (defaults `admin@vit.edu` / `ChangeMe@123`; **change them**, see `backend/.env.example`). That seeds the first **ADMIN** on an empty database only.
 Tests: `cd backend && python -m pytest tests`.
 
 ## Data
@@ -46,7 +46,7 @@ The sheet contains real names, phone numbers and emails. Treat the repository, t
 
 | Piece | Behaviour |
 |---|---|
-| Alumni link | `/update?token=…`, 192-bit random token, validated server-side on every call. Resubmitting through the same link updates the record (no duplicates). |
+| Alumni link | `/update?token=…`, 192-bit random token, validated server-side on every call. **Expires after `TOKEN_TTL_DAYS` (30); each reminder renews it.** Staff can *Disable* or *Replace* a link from the alumni drawer (an expired/disabled link answers 410). Resubmitting through a live link updates the record (no duplicates). |
 | Statuses | `PENDING` / `COMPLETED`; *overdue* = pending after the earliest started campaign's deadline. |
 | Campaigns | Draft, running, paused, completed. Interval, max attempts, batch size and deadline are configurable. Templates accept `{{name}} {{batch}} {{unique_link}} {{prn}} {{employer}}`; unknown placeholders and a missing link are rejected. |
 | Worker | Runs every `WORKER_TICK_SECONDS` and on *Run batch now*. Re-reads the alumnus' status immediately before each send, so a submission stops reminders at once. Skips completed and unsubscribed alumni. Failed sends retry on later ticks (3 tries, then the attempt is consumed); a rejected address or Telegram chat stops further attempts. |
@@ -59,9 +59,26 @@ The sheet contains real names, phone numbers and emails. Treat the repository, t
 
 Runs behind the API; nothing in the UI mentions it. It reads one JSON request on stdin and writes one JSON response: array + merge sort (export ordering), binary search (PRN lookup), doubly linked list (pending queue), binary-heap priority queue feeding a circular queue (reminder batches, ordered by days pending, missing position/letter and attempts so far), and a stack (undo). If the binary is not built, `backend/app/engine.py` uses an equivalent Python implementation (a test checks both give identical batches).
 
+## Accounts, roles and security (Phase 0)
+
+| Piece | Behaviour |
+|---|---|
+| Roles | `ADMIN` (everything), `FACULTY` (records, imports, exports, reminders, reports; no delete / users / audit), `ALUMNI` (own profile + privacy), `STUDENT` (directory only). Defined in `backend/app/rbac.py`; mirrored into the `roles`, `permissions`, `role_permissions` tables. Every API route names the permission it needs. |
+| Sessions | Login creates a server-side session; the JWT is only valid while it is live. Logout, password change, disabling a user, or *End sessions* really end access. A user's role is read from the database on each request, so changes apply immediately. |
+| Lockout | 5 wrong passwords lock the account for 15 min (same generic error either way, so accounts cannot be discovered). Per-IP and per-account rate limits on login. |
+| Passwords | 10+ chars with a letter and a digit for any new password. Reset: emailed one-hour single-use link (only its hash is stored). Without SMTP the email is only simulated; use `python -m app.manage set-password --email …`. |
+| Audit log | Append-only (database triggers reject edits/deletes). Records sign-ins (incl. failures), user/role changes, record views/edits/deletes, imports, exports, campaign actions, link actions, public submissions. Secrets are stripped. Admin page: *Audit log*. |
+| Privacy | Per-alumnus level `PRIVATE` (default) / `ALUMNI_ONLY` / `INSTITUTION` / `PUBLIC`. Non-staff only ever receive name, batch, career type and organisation names: never contact details, PRN, salary or documents. A hidden profile answers 404. |
+| Documents | `backend/app/storage.py`: validated (type + content signature + size), random keys, outside any served folder. HTTP endpoints arrive with Phase 1. |
+| Migrations | Numbered, recorded in `schema_migrations` (`backend/app/migrations.py`). Phase 0 is migration 1 and upgrades an existing database in place. |
+| Tunnel | Set `PUBLIC_URL`, `CORS_ORIGINS` and `TRUST_PROXY_HOPS=2` (tunnel → Vite → API) so rate limits see real visitors. |
+
+**PostgreSQL later:** new tables use plain `INTEGER/TEXT/REAL` and Python-generated UTC timestamps. The SQLite-specific spots to port are `datetime('now')` and `INSERT OR IGNORE/REPLACE` in the original code, the `PRAGMA` column checks in `migrations.py`, and the audit-log triggers (use `REVOKE UPDATE, DELETE` or equivalent triggers).
+
 ## Known limits (MVP)
 
-- Alumni tokens do not expire and the public endpoints are not rate-limited; add both before exposing this publicly.
+- Rate limiting is in-process (one API process). Move to Redis if you run several.
+- Documents, consent on the public form and the alumni-facing directory arrive in later phases (see `plan.md`); do not expose real personal data publicly before Phase 1 is finished.
 - SQLite and an in-process worker: run one API process. Move to PostgreSQL and a separate worker for more.
 - Contact details come from the college email on the sheet (e.g. `@vit.edu` student addresses), which may stop working after graduation; collect personal emails in the form if reminders must keep reaching alumni.
 - No unsubscribe link in outgoing messages yet; faculty toggle it per alumnus.

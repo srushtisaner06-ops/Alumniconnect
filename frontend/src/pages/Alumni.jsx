@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { ChevronLeft, ChevronRight, Copy, ExternalLink, Search, Trash2, Undo2, X } from 'lucide-react'
-import { api } from '../api'
+import { api, can } from '../api'
 import { Badge, CAREER, CATEGORIES, CATEGORY_KEYS, CategoryBadges, ErrorBox, PageHeader, Spinner, StatusBadge, fmtDate, useLoad, useToast } from '../ui.jsx'
 
 const TABS = [['all', 'All'], ['PENDING', 'Pending'], ['COMPLETED', 'Completed'], ['OVERDUE', 'Overdue']]
@@ -120,6 +120,11 @@ function Drawer({ id, onClose, onChanged }) {
   async function patch(body, msg) {
     try { await api(`/alumni/${id}`, { method: 'PATCH', body }); toast(msg); reload(); onChanged() } catch (e) { toast(e.message, 'err') }
   }
+  async function link(action) {
+    if (action === 'regenerate' && !window.confirm('Generate a new link? The current link stops working immediately.')) return
+    if (action === 'revoke' && !window.confirm('Disable this link? The person will not receive reminders until you generate a new one.')) return
+    try { await api(`/alumni/${id}/link/${action}`, { method: 'POST' }); toast(action === 'regenerate' ? 'New link generated' : 'Link disabled'); reload(); onChanged() } catch (e) { toast(e.message, 'err') }
+  }
   async function del() {
     if (!window.confirm(`Delete ${a.name}? You can undo this from the Alumni page.`)) return
     try { await api(`/alumni/${id}`, { method: 'DELETE' }); toast('Deleted. Use Undo to restore.'); onChanged(); onClose() } catch (e) { toast(e.message, 'err') }
@@ -174,9 +179,15 @@ function Drawer({ id, onClose, onChanged }) {
             {a.details && (
               <section><h3 className="mb-2 font-medium">Submitted details · {CAREER[a.career_status]}</h3>
                 <dl className="space-y-1">{Object.entries(a.details).map(([k, v]) => <div key={k} className="flex gap-2"><dt className="w-32 shrink-0 capitalize text-slate-500">{k.replace('_', ' ')}</dt><dd>{v}</dd></div>)}</dl></section>)}
-            <section><h3 className="mb-2 font-medium">Personal link</h3>
-              <div className="flex gap-2"><input readOnly className="input font-mono text-xs" value={a.link} onFocus={(e) => e.target.select()} />
-                <button className="btn-ghost" aria-label="Copy link" onClick={() => { navigator.clipboard.writeText(a.link); toast('Link copied') }}><Copy className="h-4 w-4" /></button></div></section>
+            <section><h3 className="mb-2 flex items-center gap-2 font-medium">Personal link
+              <Badge tone={a.link_status === 'active' ? 'green' : a.link_status === 'expired' ? 'amber' : 'red'}>{a.link_status}</Badge></h3>
+              <div className="flex gap-2"><input readOnly className="input font-mono text-xs" value={a.link} onFocus={(e) => e.target.select()} disabled={a.link_status !== 'active'} />
+                <button className="btn-ghost" aria-label="Copy link" disabled={a.link_status !== 'active'} onClick={() => { navigator.clipboard.writeText(a.link); toast('Link copied') }}><Copy className="h-4 w-4" /></button></div>
+              <p className="mt-1 text-xs text-slate-500">{a.link_status === 'revoked' ? 'Disabled. This person is left out of reminders until you generate a new link.' : `Valid until ${fmtDate(a.token_expires_at)}. Each reminder renews it.`}</p>
+              {can('alumni.link.manage') && <div className="mt-2 flex gap-2">
+                <button className="btn-ghost" onClick={() => link('regenerate')}>New link</button>
+                {a.link_status !== 'revoked' && <button className="btn-danger" onClick={() => link('revoke')}>Disable link</button>}</div>}
+            </section>
             <section><h3 className="mb-2 font-medium">Telegram chat ID</h3>
               <div className="flex gap-2"><input className="input" value={chat} onChange={(e) => setChat(e.target.value)} placeholder="optional" />
                 <button className="btn-ghost" onClick={() => patch({ telegram_chat_id: chat }, 'Saved')}>Save</button></div></section>
@@ -187,7 +198,7 @@ function Drawer({ id, onClose, onChanged }) {
             </section>
             <div className="flex flex-wrap gap-2 border-t border-sky-200 pt-4">
               <button className="btn-ghost" onClick={() => patch({ unsubscribed: !a.unsubscribed }, a.unsubscribed ? 'Re-subscribed' : 'Unsubscribed')}>{a.unsubscribed ? 'Re-subscribe' : 'Unsubscribe from reminders'}</button>
-              <button className="btn-danger" onClick={del}><Trash2 className="h-4 w-4" />Delete</button>
+              {can('alumni.delete') && <button className="btn-danger" onClick={del}><Trash2 className="h-4 w-4" />Delete</button>}
             </div>
           </div>)}
       </aside>

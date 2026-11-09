@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { GraduationCap, Loader2, ShieldCheck } from 'lucide-react'
-import { api, setToken } from '../api'
+import { api, setSession, setToken } from '../api'
 import { ErrorBox } from '../ui.jsx'
 
 export default function Login() {
@@ -11,7 +11,7 @@ export default function Login() {
   const [busy, setBusy] = useState(false)
   async function submit(e) {
     e.preventDefault(); setBusy(true); setErr(null)
-    try { const r = await api('/auth/login', { method: 'POST', body: f, auth: false }); setToken(r.token); nav('/dashboard') }
+    try { const r = await api('/auth/login', { method: 'POST', body: f, auth: false }); setToken(r.token); setSession({ email: r.email, role: r.role, full_name: r.full_name, permissions: r.permissions }); nav('/dashboard') }
     catch (x) { setErr(x) } finally { setBusy(false) }
   }
   return (
@@ -37,15 +37,16 @@ export default function Login() {
         <form onSubmit={submit} className="mx-auto w-full max-w-sm space-y-7">
           <div>
             <span className="silver-chip">Welcome back</span>
-            <h2 className="mt-4 text-4xl font-semibold tracking-tight text-slate-900">Faculty sign in</h2>
-            <p className="mt-3 text-sm leading-6 text-slate-500">Sign in to open the alumni administration workspace.</p>
+            <h2 className="mt-4 text-4xl font-semibold tracking-tight text-slate-900">Sign in</h2>
+            <p className="mt-3 text-sm leading-6 text-slate-500">Sign in with your institutional account.</p>
             <div className="silver-mark mt-5 w-24" />
           </div>
           <ErrorBox error={err} />
           <div><label className="label" htmlFor="email">Institutional email</label><input id="email" type="email" autoComplete="username" required autoFocus className="input" placeholder="name@college.edu" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} /></div>
           <div><label className="label" htmlFor="pw">Password</label><input id="pw" type="password" autoComplete="current-password" required className="input" placeholder="Enter your password" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} /></div>
           <button className="btn-primary w-full py-3.5 text-base" disabled={busy}>{busy && <Loader2 className="h-4 w-4 animate-spin" />}{busy ? 'Signing in…' : 'Sign in securely'}</button>
-          <p className="flex items-center justify-center gap-2 text-center text-xs leading-5 text-slate-400"><ShieldCheck className="h-4 w-4 shrink-0" />For authorised college personnel only.</p>
+          <p className="text-center text-sm"><Link className="text-indigo-700 underline" to="/forgot-password">Forgot your password?</Link></p>
+          <p className="flex items-center justify-center gap-2 text-center text-xs leading-5 text-slate-400"><ShieldCheck className="h-4 w-4 shrink-0" />For authorised users only. Sign-ins are recorded.</p>
         </form>
       </section>
     </div>

@@ -11,3 +11,4 @@ backend/.venv/
 backend/data/*.xlsx
 backend/data/*.db
 *.zip
+backend/data/private_files/
