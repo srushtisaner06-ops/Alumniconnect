@@ -124,3 +124,75 @@ def phase0(c):
     c.execute("UPDATE alumni SET token_issued_at=COALESCE(created_at, ?) WHERE token_issued_at IS NULL", (_ts(now),))
     c.execute("UPDATE alumni SET token_expires_at=? WHERE token_expires_at IS NULL",
               (_ts(now + timedelta(days=config.TOKEN_TTL_DAYS)),))
+
+
+# ------------------------------------------------------------------ 2: Phase 1 proof documents + income range
+@migration(2, "phase1_proof_and_income")
+def phase1_proof(c):
+    # Income is stored as a band code (see income.py), not a number: people choose a range, and bands are what reports use.
+    add_column(c, "alumni", "income_band", "TEXT")
+    add_column(c, "alumni", "income_updated_at", "TEXT")
+    add_column(c, "alumni", "verification_consent_at", "TEXT")      # when the person agreed to proof/income being collected
+    c.executescript("""
+    -- One row per upload. A newer upload replaces an older PENDING/REJECTED one (superseded_at); APPROVED proofs are kept
+    -- as history. storage_key is a random name inside private storage and is never sent to any client.
+    CREATE TABLE IF NOT EXISTS verification_documents(
+      id INTEGER PRIMARY KEY,
+      alumni_id INTEGER NOT NULL REFERENCES alumni(id) ON DELETE CASCADE,
+      category TEXT NOT NULL,                 -- EMPLOYMENT | HIGHER_STUDIES | ENTREPRENEURSHIP
+      doc_type TEXT NOT NULL,
+      storage_key TEXT UNIQUE NOT NULL,
+      original_name TEXT NOT NULL, content_type TEXT NOT NULL, size_bytes INTEGER NOT NULL, sha256 TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'PENDING', -- PENDING | APPROVED | REJECTED
+      rejection_reason TEXT,
+      uploaded_at TEXT NOT NULL, reviewed_by TEXT, reviewed_at TEXT, superseded_at TEXT);
+    CREATE INDEX IF NOT EXISTS idx_vdocs_alumni ON verification_documents(alumni_id);
+    CREATE INDEX IF NOT EXISTS idx_vdocs_status ON verification_documents(status, superseded_at);
+    """)
+
+
+# ------------------------------------------------------------------ 3: Phase 1B profiles, career timeline, proof reminders
+@migration(3, "phase1b_profiles_timeline_purpose")
+def phase1b(c):
+    # A campaign is either the usual "please update your details" reminder or a "please upload your proof" reminder.
+    add_column(c, "campaigns", "purpose", "TEXT NOT NULL DEFAULT 'UPDATE'")
+    c.executescript("""
+    CREATE TABLE IF NOT EXISTS profiles(
+      alumni_id INTEGER PRIMARY KEY REFERENCES alumni(id) ON DELETE CASCADE,
+      whatsapp TEXT, country TEXT, city TEXT, professional_domain TEXT, years_experience REAL, designation TEXT, headline TEXT,
+      linkedin_url TEXT, github_url TEXT, portfolio_url TEXT, updated_at TEXT NOT NULL, updated_by TEXT);
+    CREATE TABLE IF NOT EXISTS profile_skills(
+      alumni_id INTEGER NOT NULL REFERENCES alumni(id) ON DELETE CASCADE, skill TEXT NOT NULL, PRIMARY KEY (alumni_id, skill));
+    CREATE TABLE IF NOT EXISTS profile_interests(
+      alumni_id INTEGER NOT NULL REFERENCES alumni(id) ON DELETE CASCADE, interest TEXT NOT NULL, PRIMARY KEY (alumni_id, interest));
+    CREATE INDEX IF NOT EXISTS idx_profile_skills_skill ON profile_skills(skill);
+    CREATE INDEX IF NOT EXISTS idx_profile_interests_interest ON profile_interests(interest);
+
+    -- Append-only: only the three retracted_* columns can ever change, and only once. (Deleting a person still removes
+    -- their events through the foreign key, which is the right thing for an erasure request.)
+    CREATE TABLE IF NOT EXISTS career_events(
+      id INTEGER PRIMARY KEY, alumni_id INTEGER NOT NULL REFERENCES alumni(id) ON DELETE CASCADE,
+      event_type TEXT NOT NULL, event_date TEXT, title TEXT NOT NULL, organisation TEXT, detail TEXT,
+      source TEXT NOT NULL, created_at TEXT NOT NULL, created_by TEXT,
+      retracted_at TEXT, retracted_by TEXT, retract_reason TEXT);
+    CREATE INDEX IF NOT EXISTS idx_career_alumni ON career_events(alumni_id);
+    CREATE TRIGGER IF NOT EXISTS career_events_immutable
+      BEFORE UPDATE OF alumni_id, event_type, event_date, title, organisation, detail, source, created_at, created_by ON career_events
+      BEGIN SELECT RAISE(ABORT, 'career_events are append-only: retract the event and add a new one'); END;
+    CREATE TRIGGER IF NOT EXISTS career_events_retract_once
+      BEFORE UPDATE OF retracted_at ON career_events WHEN OLD.retracted_at IS NOT NULL
+      BEGIN SELECT RAISE(ABORT, 'this career event was already retracted'); END;
+    """)
+    # Backfill from what we already hold: graduation + the first job / studies / venture each person's records imply.
+    # Done in Python (not SQL) so it uses exactly the same rules as new imports; safe to re-run, nothing is duplicated.
+    from . import careers, profiles
+    import json
+    for r in c.execute("SELECT id FROM alumni").fetchall():
+        careers.baseline(c, r["id"], source="MIGRATION")
+    for r in c.execute("SELECT id, career_status, details FROM alumni WHERE details IS NOT NULL AND career_status IS NOT NULL").fetchall():
+        try:
+            details = json.loads(r["details"])
+        except ValueError:
+            continue
+        careers.record_submission(c, r["id"], r["career_status"], details, source="MIGRATION")
+        profiles.fill_from_submission(c, r["id"], r["career_status"], details)

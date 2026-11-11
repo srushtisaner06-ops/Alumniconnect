@@ -1,7 +1,7 @@
 import React from 'react'
 import { Navigate, NavLink, Outlet, Route, Routes, useNavigate } from 'react-router-dom'
 import { GraduationCap, LogOut } from 'lucide-react'
-import { api, can, clearSession, getToken } from './api'
+import { api, can, clearSession, getToken, role } from './api'
 import { ToastProvider } from './ui.jsx'
 import Login from './pages/Login.jsx'
 import Dashboard from './pages/Dashboard.jsx'
@@ -13,7 +13,10 @@ import UpdateForm from './pages/UpdateForm.jsx'
 import Success from './pages/Success.jsx'
 import Users from './pages/Users.jsx'
 import AuditLog from './pages/AuditLog.jsx'
+import Verification from './pages/Verification.jsx'
 import MyProfile from './pages/MyProfile.jsx'
+import Directory from './pages/Directory.jsx'
+import Account from './pages/Account.jsx'
 import { ForgotPassword, ResetPassword } from './pages/PasswordReset.jsx'
 
 // Each entry names the permission that unlocks it. The menu only hides things; the API enforces the same permissions.
@@ -21,16 +24,20 @@ const nav = [
   { to: '/dashboard', label: 'Overview', end: true, perm: 'report.view' },
   { to: '/dashboard/alumni', label: 'Alumni directory', end: true, perm: 'alumni.read' },
   { to: '/dashboard/alumni/import', label: 'Import records', perm: 'import.run' },
+  { to: '/dashboard/verification', label: 'Verification', perm: 'verification.review' },
   { to: '/dashboard/campaigns', label: 'Reminders', perm: 'campaign.manage' },
   { to: '/dashboard/reports', label: 'Reports', perm: 'report.view' },
   { to: '/dashboard/users', label: 'Users', perm: 'user.manage' },
   { to: '/dashboard/audit', label: 'Audit log', perm: 'audit.view' },
-  { to: '/dashboard/profile', label: 'My profile', perm: null },
+  { to: '/dashboard/profile', label: 'My profile', perm: 'profile.own.read', hideFor: ['ADMIN', 'FACULTY'] },   // needs an alumni record, so alumni only (admins hold every permission but have no record)
+  { to: '/dashboard/network', label: 'Alumni network', perm: 'directory.read', hideFor: ['ADMIN', 'FACULTY'] },   // staff already have the full directory
+  { to: '/dashboard/account', label: 'Account', perm: null },                                             // everyone: password, sessions
 ]
 const isStaff = () => can('alumni.read')
+const visible = (n) => (!n.perm || can(n.perm)) && !(n.hideFor || []).includes(role())
 
-// People without staff access (alumni, students) land on their own page instead of a dashboard they cannot use.
-const Home = () => (isStaff() ? <Dashboard /> : <Navigate to="/dashboard/profile" replace />)
+// People without staff access land on their own page instead of a dashboard they cannot use.
+const Home = () => (isStaff() ? <Dashboard /> : <Navigate to={can('profile.own.read') ? '/dashboard/profile' : '/dashboard/network'} replace />)
 
 function Shell() {
   const navigate = useNavigate()
@@ -48,7 +55,7 @@ function Shell() {
             <div className="font-display text-xl font-semibold tracking-tight text-slate-900">Alumni<span className="text-indigo-600">Connect</span></div>
           </div>
           <nav className="order-3 flex w-full gap-7 overflow-x-auto pb-1 md:order-none md:w-auto md:flex-1 md:justify-center md:overflow-visible md:pb-0" aria-label="Main navigation">
-            {nav.filter((n) => !n.perm || can(n.perm)).map(({ to, label, end }) => <NavLink key={to} to={to} end={end} className={link}>{label}</NavLink>)}
+            {nav.filter(visible).map(({ to, label, end }) => <NavLink key={to} to={to} end={end} className={link}>{label}</NavLink>)}
           </nav>
           <button className="ml-auto inline-flex items-center gap-2 text-sm font-medium text-slate-500 transition hover:text-slate-900 md:ml-0" onClick={signOut}><LogOut className="h-4 w-4" />Sign out</button>
         </div>
@@ -78,6 +85,9 @@ export default function App() {
         <Route path="/dashboard" element={<Shell />}>
           <Route index element={<Home />} />
           <Route path="profile" element={<MyProfile />} />
+          <Route path="network" element={<Directory />} />
+          <Route path="account" element={<Account />} />
+          <Route path="verification" element={<Verification />} />
           <Route path="users" element={<Users />} />
           <Route path="audit" element={<AuditLog />} />
           <Route path="alumni" element={<Alumni />} />

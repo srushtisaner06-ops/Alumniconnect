@@ -23,6 +23,7 @@ MIN_PASSWORD_LENGTH = int(os.getenv("MIN_PASSWORD_LENGTH", "10"))
 LOCKOUT_THRESHOLD = int(os.getenv("LOCKOUT_THRESHOLD", "5"))     # consecutive wrong passwords before the account locks
 LOCKOUT_MINUTES = int(os.getenv("LOCKOUT_MINUTES", "15"))
 RESET_TOKEN_MINUTES = int(os.getenv("RESET_TOKEN_MINUTES", "60"))
+INVITE_HOURS = int(os.getenv("INVITE_HOURS", "72"))              # how long a new user has to set their first password
 # Public alumni links. Every link expires; sending a reminder renews it (rolling), and staff can revoke or replace it.
 TOKEN_TTL_DAYS = int(os.getenv("TOKEN_TTL_DAYS", "30"))
 # Rate limiting is in-process (matches the single-process deployment). Behind a tunnel/reverse proxy every request
@@ -34,6 +35,13 @@ TRUST_PROXY_HOPS = int(os.getenv("TRUST_PROXY_HOPS", "0"))
 STORAGE_BACKEND = os.getenv("STORAGE_BACKEND", "local")
 STORAGE_ROOT = os.getenv("STORAGE_ROOT", str(BASE / "data" / "private_files"))
 MAX_DOCUMENT_BYTES = int(os.getenv("MAX_DOCUMENT_BYTES", str(5 * 1024 * 1024)))
+
+# ---- Phase 1: proof of career + income range on the alumni form -------------------------------
+# When on, a submission must carry an accepted proof upload, an income range and the person's consent.
+# Switch off (=0) only to run the pre-Phase-1 tests or for a soft rollout.
+REQUIRE_PROOF = os.getenv("REQUIRE_PROOF", "1") == "1"
+REQUIRE_INCOME_RANGE = os.getenv("REQUIRE_INCOME_RANGE", "1") == "1"
+MAX_PROOFS_PER_ALUMNI = int(os.getenv("MAX_PROOFS_PER_ALUMNI", "10"))   # live (not replaced) uploads per person
 
 
 def check_production():

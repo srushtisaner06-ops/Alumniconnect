@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { ChevronLeft, ChevronRight, Copy, ExternalLink, Search, Trash2, Undo2, X } from 'lucide-react'
-import { api, can } from '../api'
+import { api, can, download } from '../api'
+import { reviewDocument } from './Verification.jsx'
 import { Badge, CAREER, CATEGORIES, CATEGORY_KEYS, CategoryBadges, ErrorBox, PageHeader, Spinner, StatusBadge, fmtDate, useLoad, useToast } from '../ui.jsx'
 
 const TABS = [['all', 'All'], ['PENDING', 'Pending'], ['COMPLETED', 'Completed'], ['OVERDUE', 'Overdue']]
@@ -125,6 +126,16 @@ function Drawer({ id, onClose, onChanged }) {
     if (action === 'revoke' && !window.confirm('Disable this link? The person will not receive reminders until you generate a new one.')) return
     try { await api(`/alumni/${id}/link/${action}`, { method: 'POST' }); toast(action === 'regenerate' ? 'New link generated' : 'Link disabled'); reload(); onChanged() } catch (e) { toast(e.message, 'err') }
   }
+  async function createLogin() {
+    if (!a.email) { toast('This alumnus has no email address on record.', 'err'); return }
+    if (!window.confirm(`Create a login for ${a.name} and send an invite to ${a.email}?`)) return
+    try {
+      const r = await api('/users', { method: 'POST', body: { email: a.email, full_name: a.name, role: 'ALUMNI', alumni_id: id, password: null } })
+      if (r.invite_link) window.prompt('Email is not set up on this server. Copy this one-time invite link and send it to the alumnus:', r.invite_link)
+      else toast('Invite emailed')
+      reload()
+    } catch (e) { toast(e.message, 'err') }
+  }
   async function del() {
     if (!window.confirm(`Delete ${a.name}? You can undo this from the Alumni page.`)) return
     try { await api(`/alumni/${id}`, { method: 'DELETE' }); toast('Deleted. Use Undo to restore.'); onChanged(); onClose() } catch (e) { toast(e.message, 'err') }
@@ -179,10 +190,52 @@ function Drawer({ id, onClose, onChanged }) {
             {a.details && (
               <section><h3 className="mb-2 font-medium">Submitted details · {CAREER[a.career_status]}</h3>
                 <dl className="space-y-1">{Object.entries(a.details).map(([k, v]) => <div key={k} className="flex gap-2"><dt className="w-32 shrink-0 capitalize text-slate-500">{k.replace('_', ' ')}</dt><dd>{v}</dd></div>)}</dl></section>)}
+            {can('verification.review') && (
+              <section><h3 className="mb-2 font-medium">Proof and income</h3>
+                <p className="text-sm text-slate-600">Income range: <b>{a.income_label || 'not provided'}</b></p>
+                {!(a.documents || []).length ? <p className="mt-1 text-sm text-slate-500">No proof uploaded yet.</p> : (
+                  <ul className="mt-2 space-y-3">{a.documents.map((d) => (
+                    <li key={d.id} className={`border-l-4 pl-3 ${d.superseded ? 'border-slate-200 opacity-60' : d.status === 'APPROVED' ? 'border-emerald-400' : d.status === 'REJECTED' ? 'border-red-400' : 'border-amber-400'}`}>
+                      <div className="flex flex-wrap items-center gap-2 text-sm"><span className="font-medium">{d.doc_label}</span>
+                        <Badge tone={d.superseded ? 'slate' : d.status === 'APPROVED' ? 'green' : d.status === 'REJECTED' ? 'red' : 'amber'}>{d.superseded ? 'replaced' : d.status.toLowerCase()}</Badge></div>
+                      <div className="text-xs text-slate-500">{d.original_name} · {fmtDate(d.uploaded_at)}{d.reviewed_by && ` · reviewed by ${d.reviewed_by}`}</div>
+                      {d.rejection_reason && <div className="text-xs text-red-700">{d.rejection_reason}</div>}
+                      {!d.superseded && <div className="mt-1 flex gap-2">
+                        <button className="btn-ghost" onClick={() => download(`/documents/${d.id}/download`, d.original_name).catch((e) => toast(e.message, 'err'))}>Open</button>
+                        {d.status !== 'APPROVED' && <button className="btn-ghost" onClick={() => reviewDocument(d, 'APPROVED', toast, () => { reload(); onChanged() })}>Approve</button>}
+                        {d.status !== 'REJECTED' && <button className="btn-danger" onClick={() => reviewDocument(d, 'REJECTED', toast, () => { reload(); onChanged() })}>Reject</button>}</div>}
+                    </li>))}</ul>)}
+              </section>)}
+            {a.profile && (
+              <section><h3 className="mb-2 font-medium">Profile</h3>
+                {[a.profile.designation, a.profile.professional_domain, [a.profile.city, a.profile.country].filter(Boolean).join(', '), a.profile.years_experience != null && `${a.profile.years_experience} yrs experience`].filter(Boolean).length === 0 && !a.profile.skills.length
+                  ? <p className="text-sm text-slate-500">Nothing filled in yet.</p>
+                  : <div className="space-y-1 text-sm text-slate-700">
+                      <p>{[a.profile.designation, a.profile.professional_domain].filter(Boolean).join(' · ')}</p>
+                      <p>{[a.profile.city, a.profile.country].filter(Boolean).join(', ')}{a.profile.years_experience != null && ` · ${a.profile.years_experience} yrs experience`}</p>
+                      {a.profile.whatsapp && <p>WhatsApp: {a.profile.whatsapp}</p>}
+                      {a.profile.skills.length > 0 && <p className="text-slate-500">Skills: {a.profile.skills.join(', ')}</p>}</div>}
+              </section>)}
+            {a.career_events && (
+              <section><h3 className="mb-2 font-medium">Career timeline</h3>
+                <ol className="space-y-2 border-l-2 border-sky-200 pl-4 text-sm">{a.career_events.map((ev) => (
+                  <li key={ev.id} className={ev.retracted ? 'opacity-50' : ''}>
+                    <div className={ev.retracted ? 'line-through' : ''}><span className="font-medium">{ev.title}</span> <Badge tone="slate">{ev.type_label}</Badge> <span className="text-xs text-slate-500">{ev.event_date || 'date not given'}</span></div>
+                    {(ev.organisation || ev.detail) && <div className="text-xs text-slate-500">{[ev.organisation, ev.detail].filter(Boolean).join(' · ')}</div>}
+                    {ev.retracted && <div className="text-xs text-slate-500">Retracted by {ev.retracted_by}: {ev.retract_reason}</div>}
+                  </li>))}</ol>
+              </section>)}
+            {a.account !== undefined && (
+              <section><h3 className="mb-2 font-medium">Login</h3>
+                {a.account ? <p className="text-sm text-slate-600">Has a login: {a.account.email} <Badge tone={a.account.is_active ? 'green' : 'slate'}>{a.account.is_active ? 'active' : 'disabled'}</Badge></p>
+                  : <><p className="mb-2 text-sm text-slate-500">No login yet. A login lets this person manage their own profile and privacy.</p><button className="btn-ghost" onClick={createLogin}>Create login &amp; send invite</button></>}
+              </section>)}
             <section><h3 className="mb-2 flex items-center gap-2 font-medium">Personal link
               <Badge tone={a.link_status === 'active' ? 'green' : a.link_status === 'expired' ? 'amber' : 'red'}>{a.link_status}</Badge></h3>
               <div className="flex gap-2"><input readOnly className="input font-mono text-xs" value={a.link} onFocus={(e) => e.target.select()} disabled={a.link_status !== 'active'} />
-                <button className="btn-ghost" aria-label="Copy link" disabled={a.link_status !== 'active'} onClick={() => { navigator.clipboard.writeText(a.link); toast('Link copied') }}><Copy className="h-4 w-4" /></button></div>
+                <button className="btn-ghost" aria-label="Copy link" disabled={a.link_status !== 'active'} onClick={() => { navigator.clipboard.writeText(a.link); toast('Link copied') }}><Copy className="h-4 w-4" /></button>
+                {a.link_status === 'active' && <a className="btn-ghost whitespace-nowrap" target="_blank" rel="noopener noreferrer" title="Opens the alumni form on the address you are using now"
+                  href={`${window.location.origin}/update?token=${a.link.split('token=')[1]}`}>Open form</a>}</div>
               <p className="mt-1 text-xs text-slate-500">{a.link_status === 'revoked' ? 'Disabled. This person is left out of reminders until you generate a new link.' : `Valid until ${fmtDate(a.token_expires_at)}. Each reminder renews it.`}</p>
               {can('alumni.link.manage') && <div className="mt-2 flex gap-2">
                 <button className="btn-ghost" onClick={() => link('regenerate')}>New link</button>

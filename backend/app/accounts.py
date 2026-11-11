@@ -190,7 +190,7 @@ def _hash_token(raw):
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
-def create_password_reset(c, email, ip=None):
+def create_password_reset(c, email, ip=None, minutes=None):
     """Returns (user_row, raw_token), or None if the email is unknown / the account is disabled. The caller must answer
     identically either way so the endpoint cannot be used to discover which emails have accounts."""
     u = get_by_email(c, email)
@@ -199,7 +199,7 @@ def create_password_reset(c, email, ip=None):
     c.execute("UPDATE password_resets SET used_at=? WHERE user_id=? AND used_at IS NULL", (ts(), u["id"]))   # older links die
     raw = secrets.token_urlsafe(32)
     c.execute("INSERT INTO password_resets(user_id,token_hash,created_at,expires_at,requested_ip) VALUES(?,?,?,?,?)",
-              (u["id"], _hash_token(raw), ts(), ts(datetime.now(timezone.utc) + timedelta(minutes=config.RESET_TOKEN_MINUTES)), ip))
+              (u["id"], _hash_token(raw), ts(), ts(datetime.now(timezone.utc) + timedelta(minutes=minutes or config.RESET_TOKEN_MINUTES)), ip))
     return u, raw
 
 

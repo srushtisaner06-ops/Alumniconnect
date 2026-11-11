@@ -2,7 +2,7 @@ import json
 import statistics
 from datetime import datetime, timedelta, timezone
 
-from . import config, engine, notifier
+from . import careers, config, documents, engine, income, notifier
 from .db import db
 from .security import new_token
 
@@ -75,6 +75,8 @@ def alumnus_dict(c, row, with_offers=True):
     cutoff = overdue_cutoff(c)
     d["overdue"] = bool(cutoff and d["status"] == "PENDING" and cutoff < now().strftime("%Y-%m-%d"))
     d["link_status"] = token_state(row)
+    d["income_label"] = income.label(d.get("income_band"))        # staff / owner only: never in the member-visible profile
+    d["proof"] = documents.current(c, d["id"])                    # latest proof's status, no file key
     if with_offers:
         d["offers"] = [dict(o) for o in c.execute("SELECT * FROM offers WHERE alumni_id=? ORDER BY package_lpa DESC", (d["id"],))]
         d["best_package"] = max([o["package_lpa"] or 0 for o in d["offers"]], default=0)
@@ -138,6 +140,7 @@ def import_students(c, students, graduation_year, replace=False, final_year_stud
             c.execute("INSERT INTO ventures(alumni_id,company,registration_no,website,letter_link) VALUES(?,?,?,?,?)",
                       (aid, v["company"], v["registration_no"], v["website"], v["letter_link"]))
             ventures_added += 1
+        careers.baseline(c, aid)                    # graduation + first job / studies / venture, if not already there
     if final_year_students:
         c.execute("INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
                   (f"final_year_students:{graduation_year}", str(final_year_students)))
@@ -156,6 +159,11 @@ def snapshot(c, aid):
         snap[table] = [dict(o) for o in c.execute(f"SELECT * FROM {table} WHERE alumni_id=?", (aid,))]
     v = c.execute("SELECT level FROM profile_visibility WHERE alumni_id=?", (aid,)).fetchone()
     snap["visibility"] = v["level"] if v else None
+    p = c.execute("SELECT * FROM profiles WHERE alumni_id=?", (aid,)).fetchone()
+    snap["profile"] = {"row": dict(p) if p else None,
+                       "skills": [r[0] for r in c.execute("SELECT skill FROM profile_skills WHERE alumni_id=?", (aid,))],
+                       "interests": [r[0] for r in c.execute("SELECT interest FROM profile_interests WHERE alumni_id=?", (aid,))]}
+    snap["career_events"] = [dict(r) for r in c.execute("SELECT * FROM career_events WHERE alumni_id=? ORDER BY id", (aid,))]
     return snap
 
 
@@ -172,6 +180,17 @@ def restore(c, snap):
         for o in snap.get(table, []):
             oc = list(o.keys())
             c.execute(f"INSERT INTO {table}({','.join(oc)}) VALUES({','.join('?' * len(oc))})", [o[k] for k in oc])
+    prof = snap.get("profile") or {}                 # snapshots from before Phase 1B simply have none of this
+    if prof.get("row"):
+        pc = list(prof["row"].keys())
+        c.execute(f"INSERT INTO profiles({','.join(pc)}) VALUES({','.join('?' * len(pc))})", [prof["row"][k] for k in pc])
+    for sk in prof.get("skills", []):
+        c.execute("INSERT INTO profile_skills(alumni_id,skill) VALUES(?,?)", (a["id"], sk))
+    for it in prof.get("interests", []):
+        c.execute("INSERT INTO profile_interests(alumni_id,interest) VALUES(?,?)", (a["id"], it))
+    for ev in snap.get("career_events", []):
+        ec = list(ev.keys())
+        c.execute(f"INSERT INTO career_events({','.join(ec)}) VALUES({','.join('?' * len(ec))})", [ev[k] for k in ec])
 
 
 def undo_last(c):
@@ -263,20 +282,29 @@ def people_for(c, ids):
     return out
 
 
-def preview_recipients(c, sel, channel, max_attempts):
-    """Live counts shown before a campaign starts. Buckets are exclusive and add up to `selected`."""
+def preview_recipients(c, sel, channel, max_attempts, purpose="UPDATE"):
+    """Live counts shown before a campaign starts. Buckets are exclusive and add up to `selected`.
+    For a PROOF campaign, `completed` means "already has a proof on file" and `not_submitted` are people who have not
+    filled the form at all yet (they need the normal reminder first)."""
     ids = sorted(resolve_selection(c, sel))
     out = {"selected": len(ids), "eligible": 0, "completed": 0, "unsubscribed": 0, "no_contact": 0, "attempts_used": 0}
     camp = {"channel": channel}
+    proof = purpose == "PROOF"
+    if proof:
+        out["not_submitted"] = 0       # only proof campaigns have this bucket; the normal preview keeps its original shape
     for ch in _chunks(ids):
         for a in c.execute(f"SELECT * FROM alumni WHERE id IN ({_marks(ch)})", ch):
-            if a["status"] == "COMPLETED":
+            if proof and a["status"] != "COMPLETED":
+                out["not_submitted"] += 1
+            elif proof and not needs_proof(c, a["id"]) and not a["unsubscribed"]:
+                out["completed"] += 1
+            elif not proof and a["status"] == "COMPLETED":
                 out["completed"] += 1
             elif a["unsubscribed"]:
                 out["unsubscribed"] += 1
             elif not _channels(camp, a):
                 out["no_contact"] += 1          # no usable email / Telegram chat id for this channel
-            elif a["reminders_sent"] >= max_attempts:
+            elif not proof and a["reminders_sent"] >= max_attempts:
                 out["attempts_used"] += 1
             else:
                 out["eligible"] += 1
@@ -315,22 +343,52 @@ def _other_org(c, aid):
     return r["o"] if r else ""
 
 
+# A campaign has a purpose. UPDATE (the original): remind people who have not submitted the form yet. PROOF: remind people who
+# HAVE submitted but have no proof on file, or whose proof was rejected. Those people are COMPLETED, so the original
+# query would never reach them, and the per-person counters on `alumni` belong to UPDATE reminders, so a PROOF campaign
+# counts its own attempts from its own log instead.
+PROOF_NEEDED_SQL = ("SELECT * FROM alumni a WHERE a.status='COMPLETED' AND a.unsubscribed=0 AND a.token_revoked_at IS NULL AND "
+                    "COALESCE((SELECT d.status FROM verification_documents d WHERE d.alumni_id=a.id AND d.superseded_at IS NULL "
+                    "ORDER BY d.id DESC LIMIT 1), 'MISSING') IN ('MISSING','REJECTED')")
+
+
+def needs_proof(c, aid):
+    return c.execute(PROOF_NEEDED_SQL + " AND a.id=?", (aid,)).fetchone() is not None
+
+
+def _proof_history(c, camp_id, aid):
+    r = c.execute("SELECT COALESCE(MAX(attempt),0) n, MAX(created_at) last FROM reminder_log "
+                  "WHERE campaign_id=? AND alumni_id=? AND status IN ('SENT','SIMULATED')", (camp_id, aid)).fetchone()
+    return r["n"], parse_ts(r["last"])
+
+
+def _candidates(c, camp):
+    """(alumnus row, attempts already made, time of last reminder) for everyone this campaign could still contact."""
+    if camp["purpose"] == "PROOF":
+        for a in c.execute(PROOF_NEEDED_SQL).fetchall():
+            n, last = _proof_history(c, camp["id"], a["id"])
+            if n < camp["max_attempts"]:
+                yield a, n, last
+    else:
+        for a in c.execute("SELECT * FROM alumni WHERE status='PENDING' AND unsubscribed=0 AND token_revoked_at IS NULL AND reminders_sent<?",
+                           (camp["max_attempts"],)).fetchall():
+            yield a, a["reminders_sent"], parse_ts(a["last_reminder_at"])
+
+
 def eligible(c, camp):
     t = now()
     out = []
     sel = campaign_recipient_ids(c, camp["id"])      # None = everyone (legacy campaigns)
-    for a in c.execute("SELECT * FROM alumni WHERE status='PENDING' AND unsubscribed=0 AND token_revoked_at IS NULL AND reminders_sent<?",
-                       (camp["max_attempts"],)).fetchall():
+    for a, _sent, last in _candidates(c, camp):
         if sel is not None and a["id"] not in sel:
             continue
-        last = parse_ts(a["last_reminder_at"])
         if last and t - last < timedelta(hours=camp["interval_hours"]):
             continue
         if not _channels(camp, a):
             continue
         offers = c.execute("SELECT * FROM offers WHERE alumni_id=? ORDER BY package_lpa DESC", (a["id"],)).fetchall()
         d = dict(a)
-        d["priority"] = _priority(a, offers)
+        d["priority"] = _priority({**d, "reminders_sent": _sent}, offers)
         d["employer"] = offers[0]["employer"] if offers else _other_org(c, a["id"])
         out.append(d)
     return out
@@ -350,8 +408,7 @@ def eligible_total(c, camp):
     """Alumni who could still be reminded now or later (ignores the interval)."""
     n = 0
     sel = campaign_recipient_ids(c, camp["id"])
-    for a in c.execute("SELECT * FROM alumni WHERE status='PENDING' AND unsubscribed=0 AND token_revoked_at IS NULL AND reminders_sent<?",
-                       (camp["max_attempts"],)).fetchall():
+    for a, _sent, _last in _candidates(c, camp):
         if sel is not None and a["id"] not in sel:
             continue
         if _channels(camp, a):
@@ -374,14 +431,16 @@ def run_campaign(camp_id):
         result["remaining"] = len(elig) - len(batch)
         for aid in batch:
             fresh = c.execute("SELECT * FROM alumni WHERE id=?", (aid,)).fetchone()  # latest status, right before sending
-            if fresh is None or fresh["status"] != "PENDING" or fresh["unsubscribed"]:
+            proof = camp["purpose"] == "PROOF"
+            stale = (fresh is None or fresh["unsubscribed"] or (not needs_proof(c, aid) if proof else fresh["status"] != "PENDING"))
+            if stale:
                 c.execute("INSERT INTO reminder_log(campaign_id,alumni_id,channel,status,attempt,error) VALUES(?,?,?,?,?,?)",
-                          (camp_id, aid, "-", "SKIPPED", 0, "completed or unsubscribed"))
+                          (camp_id, aid, "-", "SKIPPED", 0, "proof received or unsubscribed" if proof else "completed or unsubscribed"))
                 result["skipped"] += 1
                 continue
             extend_token(c, aid)                                   # the link in this message must still work when it arrives
             a = dict(by_id[aid])
-            attempt = fresh["reminders_sent"] + 1
+            attempt = (_proof_history(c, camp_id, aid)[0] if proof else fresh["reminders_sent"]) + 1
             chans, outcomes = _channels(camp, a), []
             for ch in chans:
                 err = None
@@ -402,7 +461,8 @@ def run_campaign(camp_id):
                             st = "SIMULATED"
                 except notifier.PermanentError as e:
                     st, err = "SKIPPED", str(e)
-                    c.execute("UPDATE alumni SET reminders_sent=? WHERE id=?", (camp["max_attempts"], aid))  # invalid contact: stop
+                    if not proof:
+                        c.execute("UPDATE alumni SET reminders_sent=? WHERE id=?", (camp["max_attempts"], aid))  # invalid contact: stop
                 except Exception as e:
                     st, err = "FAILED", str(e)[:200]
                 c.execute("INSERT INTO reminder_log(campaign_id,alumni_id,channel,status,attempt,error) VALUES(?,?,?,?,?,?)",
@@ -412,7 +472,7 @@ def run_campaign(camp_id):
             ok = any(o in ("SENT", "SIMULATED") for o in outcomes)
             gave_up = bool(outcomes) and all(o == "FAILED" for o in outcomes) and \
                 _consecutive_failures(c, camp_id, aid) >= MAX_RETRIES * len(chans)
-            if ok or gave_up:
+            if (ok or gave_up) and not proof:             # proof reminders are counted from their own log, not on the person
                 c.execute("UPDATE alumni SET reminders_sent=reminders_sent+1, last_reminder_at=? WHERE id=? AND reminders_sent<?",
                           (iso(now()), aid, camp["max_attempts"]))
         if eligible_total(c, camp) == 0:

@@ -8,6 +8,7 @@ const SESSION = 'ac_session'
 export const getSession = () => { try { return JSON.parse(localStorage.getItem(SESSION)) } catch { return null } }
 export const setSession = (s) => (s ? localStorage.setItem(SESSION, JSON.stringify(s)) : localStorage.removeItem(SESSION))
 export const can = (perm) => !!getSession()?.permissions?.includes(perm)
+export const role = () => getSession()?.role
 export function clearSession() { setToken(null); setSession(null) }
 
 function message(detail, fallback) {

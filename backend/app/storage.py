@@ -86,6 +86,10 @@ class StorageBackend(ABC):
     @abstractmethod
     def exists(self, key): ...
 
+    @abstractmethod
+    def list_keys(self):
+        """[(key, modified_epoch_seconds)] for every stored file. Used to sweep orphans."""
+
     def save_upload(self, filename, data, declared_type=None, max_bytes=None):
         """Validate, then store under a fresh random key."""
         ext, ctype = validate_upload(filename, data, declared_type, max_bytes)
@@ -133,6 +137,9 @@ class LocalPrivateStorage(StorageBackend):
 
     def exists(self, key):
         return self._path(key).is_file()
+
+    def list_keys(self):
+        return [(p.name, p.stat().st_mtime) for p in self.root.iterdir() if p.is_file() and _KEY_RE.match(p.name)]
 
 
 _storage = None

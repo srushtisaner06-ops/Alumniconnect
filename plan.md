@@ -1,5 +1,14 @@
 # AlumniConnect Feature Audit and Implementation Plan
 
+## Implementation status
+
+| Phase | Status | Notes |
+|---|---|---|
+| 0 Foundation and security | Done | Roles, sessions, audit log, expiring links, rate limits, privacy levels, storage, migrations. See `PHASE0_CHANGES.md`. |
+| 1 Profiles and forms | Done (department deferred) | **1A:** proof upload + review, income range, consent. **1B:** `career_events` timeline with back-fill, structured profile fields, role-specific menus/pages, invites, member network, proof reminders. Department was deliberately left out. The public form is unchanged apart from the Verification section. |
+| 2 Directory and analytics | Next | Filters (domain, company, college, country, batch, designation, experience, skills), sorting, filtered exports, domain/country/designation analytics. A basic search already exists in the member network. |
+| 3–6 | Not started | |
+
 ## Scope
 
 This document records the feature audit and the remaining implementation plan. Only this file is being added; no application, schema, configuration, test, or existing project file is changed by this plan.

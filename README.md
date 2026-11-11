@@ -75,6 +75,33 @@ Runs behind the API; nothing in the UI mentions it. It reads one JSON request on
 
 **PostgreSQL later:** new tables use plain `INTEGER/TEXT/REAL` and Python-generated UTC timestamps. The SQLite-specific spots to port are `datetime('now')` and `INSERT OR IGNORE/REPLACE` in the original code, the `PRAGMA` column checks in `migrations.py`, and the audit-log triggers (use `REVOKE UPDATE, DELETE` or equivalent triggers).
 
+## Proof of career and income range (Phase 1)
+
+The public form keeps its existing fields and gains a **Verification** section:
+
+| Piece | Behaviour |
+|---|---|
+| Proof | Alumni upload one file (PDF/PNG/JPG, 5 MB) and say what it is: for a job a joining/offer email, company ID card, appointment letter; for higher studies an admission letter, university ID, fee receipt; for a venture a registration certificate or business proof. Uploaded through their personal link, stored privately (`backend/data/private_files`, never served as a static file). A newer upload replaces an older pending/rejected one; approved proofs are kept. |
+| Review | Admin and Faculty see a **Verification** queue, open the file, then **Approve** or **Reject with a reason**. The alumnus sees the reason on their link and uploads again. Every upload, review and download is in the audit log. |
+| Income range | A band, not a number: annual package (job), annual stipend/scholarship (studies, includes "None / self-funded"), annual earnings from the venture (includes "Not earning yet"). Bands are defined in `backend/app/income.py`. |
+| Consent | A required tick box. Income is never stored without it. |
+| Privacy | Proofs and income are visible only to staff with review permission and to the alumnus themself. They are never in the member-visible profile. Deleting a person deletes their files. |
+| Switches | `REQUIRE_PROOF` and `REQUIRE_INCOME_RANGE` (default on). The submissions export gains *Income Range* and *Proof Status* columns at the end; the placement / higher-studies / entrepreneurship exports are unchanged so they still re-import. |
+
+People who submitted *before* this change have no proof or income on file. Their link still works; asking them to add it is a follow-up (see `plan.md`).
+
+## Profiles, career timeline and the member network (Phase 1B)
+
+| Piece | Behaviour |
+|---|---|
+| Menus by role | **Admin** sees everything incl. Users and Audit log. **Faculty** sees records, imports, verification, reminders and reports. **Alumni** see *My profile*, *Alumni network* and *Account*. **Students** see *Alumni network* and *Account*. Everyone has *Account* (change password, see and end sessions). The menu only hides things; the API enforces every permission. |
+| Accounts | Nobody registers themselves. An admin creates a login from **Users** (search the alumnus by name/PRN) or from the alumnus' drawer (*Create login*). The person receives an emailed link to choose their own password (72 h, single use). If email is not configured the link is shown once to the admin to pass on. |
+| My profile (alumni) | Privacy level, an *About you* form (headline, designation, field, city, country, years of experience, WhatsApp, LinkedIn/GitHub/portfolio, skills, interests), the career timeline, and proof status. WhatsApp is only ever visible to the person and staff. Links must be https; LinkedIn/GitHub links must be on those sites. |
+| Career timeline | Append-only. The system writes *Graduation*, *First job*, *Higher studies* and *Entrepreneurship* from existing records, and *Job change* / *Promotion* when a re-submitted form shows a new employer or designation. People and staff add achievements etc. Mistakes are **retracted** (kept, struck through, with who and why), never edited or deleted; the database refuses edits. Existing records were back-filled by migration 3. |
+| Alumni network | Alumni and students browse profiles whose owners chose to share with them (search name, organisation, city, skill, field). Filters and sorting come in Phase 2. |
+| Proof reminders | In **Reminders** a round can be *Ask for proof*: it reaches people who submitted the form but have no proof (or a rejected one), counts its own attempts, and stops once a proof is uploaded. Normal rounds are unchanged. |
+| Open form | In the alumni drawer, **Open form** opens that person's form on the address you are using now, so it works even if `PUBLIC_URL` is wrong. |
+
 ## Known limits (MVP)
 
 - Rate limiting is in-process (one API process). Move to Redis if you run several.

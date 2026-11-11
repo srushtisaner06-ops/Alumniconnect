@@ -15,7 +15,7 @@ is private until someone deliberately allows it here.
 """
 from datetime import datetime, timezone
 
-from . import rbac
+from . import careers, profiles, rbac
 
 PRIVATE, ALUMNI_ONLY, INSTITUTION, PUBLIC = "PRIVATE", "ALUMNI_ONLY", "INSTITUTION", "PUBLIC"
 LEVELS = (PRIVATE, ALUMNI_ONLY, INSTITUTION, PUBLIC)
@@ -30,7 +30,7 @@ _AUDIENCE = {
 }
 
 # What a non-staff, non-owner viewer may ever receive.
-SHARED_FIELDS = ("id", "name", "graduation_year", "career_status", "organisations")
+SHARED_FIELDS = ("id", "name", "graduation_year", "career_status", "organisations", "profile", "timeline")
 # What the owner sees about themselves: their own record, without internal reminder bookkeeping or the secret link.
 OWNER_HIDDEN = {"token", "token_issued_at", "token_expires_at", "token_revoked_at", "reminders_sent", "last_reminder_at",
                 "unsubscribed", "overdue", "link_status"}
@@ -76,6 +76,49 @@ def organisations(c, alumni_id):
     return uniq
 
 
+def member_view(c, row):
+    """The allow-listed profile other members may see. `profile` carries only profiles.MEMBER_FIELDS (never the WhatsApp
+    number) plus skills and interests; `timeline` carries live events only."""
+    aid = row["id"]
+    p = profiles.get(c, aid)
+    prof = {k: p[k] for k in profiles.MEMBER_FIELDS}
+    prof["skills"], prof["interests"] = p["skills"], p["interests"]
+    return {"id": aid, "name": row["name"], "graduation_year": row["graduation_year"], "career_status": row["career_status"],
+            "organisations": organisations(c, aid), "profile": prof, "timeline": careers.member_view(careers.list_events(c, aid, False))}
+
+
+def levels_visible_to(principal):
+    role = principal.role if principal else None
+    if role in rbac.STAFF_ROLES:
+        return set(LEVELS)
+    return {lvl for lvl, audience in _AUDIENCE.items() if role in audience}
+
+
+def directory(c, principal, search="", batch=None, page=1, page_size=24):
+    """Profiles this viewer may browse, in the member view (staff browsing here see exactly what a student would;
+    their full tools are the Alumni directory). A person always appears to themself."""
+    levels = sorted(levels_visible_to(principal))
+    own = principal.alumni_id if principal and principal.alumni_id else None
+    where = [f"(COALESCE(v.level,'PRIVATE') IN ({','.join('?' * len(levels))})" + (" OR a.id=?)" if own else ")")]
+    args = levels + ([own] if own else [])
+    if batch:
+        where.append("a.graduation_year=?")
+        args.append(int(batch))
+    term = (search or "").strip()
+    if term:
+        like = f"%{term}%"
+        where.append("(a.name LIKE ? OR EXISTS(SELECT 1 FROM offers o WHERE o.alumni_id=a.id AND o.employer LIKE ?) "
+                     "OR EXISTS(SELECT 1 FROM higher_studies h WHERE h.alumni_id=a.id AND h.institution LIKE ?) "
+                     "OR EXISTS(SELECT 1 FROM ventures vv WHERE vv.alumni_id=a.id AND vv.company LIKE ?) "
+                     "OR EXISTS(SELECT 1 FROM profiles p WHERE p.alumni_id=a.id AND (p.professional_domain LIKE ? OR p.city LIKE ? OR p.country LIKE ? OR p.designation LIKE ?)) "
+                     "OR EXISTS(SELECT 1 FROM profile_skills s WHERE s.alumni_id=a.id AND s.skill LIKE ?))")
+        args += [like] * 9
+    base = f"FROM alumni a LEFT JOIN profile_visibility v ON v.alumni_id=a.id WHERE {' AND '.join(where)}"
+    total = c.execute(f"SELECT COUNT(*) n {base}", args).fetchone()["n"]
+    rows = c.execute(f"SELECT a.* {base} ORDER BY a.name COLLATE NOCASE LIMIT ? OFFSET ?", args + [page_size, (max(page, 1) - 1) * page_size]).fetchall()
+    return {"items": [member_view(c, r) for r in rows], "total": total, "page": page, "page_size": page_size}
+
+
 def shape(c, row, principal):
     """The profile as `principal` is allowed to see it, or None if they may not see it at all (callers answer 404,
     never 403, so the existence of a private profile is not revealed)."""
@@ -95,9 +138,10 @@ def shape(c, row, principal):
                 d.pop(k, None)
         d["visibility"] = level
         d["viewer"] = "staff" if staff else "owner"
+        d["profile"] = profiles.get(c, aid)                       # the person's own / staff view includes the WhatsApp number
+        d["career_events"] = careers.list_events(c, aid)           # including retracted ones, struck through
         return d
-    out = {"id": aid, "name": row["name"], "graduation_year": row["graduation_year"],
-           "career_status": row["career_status"], "organisations": organisations(c, aid)}
+    out = member_view(c, row)
     assert set(out) <= set(SHARED_FIELDS)
     out["viewer"] = "member" if principal else "anonymous"
     return out

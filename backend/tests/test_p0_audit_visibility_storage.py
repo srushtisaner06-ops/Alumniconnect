@@ -69,7 +69,8 @@ def test_public_submission_is_audited(client, auth, import_people):
                                                  "details": {"company": "A", "designation": "B", "industry": "C"}})
     assert r.status_code == 200
     row = logs(client, auth, action="public.submit", entity_id=aid)["items"][0]
-    assert row["detail"] == {"career_status": "EMPLOYMENT", "resubmission": False} and "token" not in str(row)
+    assert row["detail"] == {"career_status": "EMPLOYMENT", "resubmission": False, "income_band": None, "consent": False}
+    assert "token" not in str(row)
 
 
 # ---------------------------------------------------------------- visibility
@@ -217,7 +218,7 @@ def test_legacy_database_upgrades_without_losing_data(tmp_path, monkeypatch):
         assert c.execute("SELECT role FROM users").fetchone()["role"] == "ADMIN"
         a = c.execute("SELECT * FROM alumni").fetchone()
         assert a["name"] == "Old Timer" and a["token_expires_at"] and a["token_revoked_at"] is None
-        assert [r["version"] for r in c.execute("SELECT version FROM schema_migrations")] == [1]
+        assert [r["version"] for r in c.execute("SELECT version FROM schema_migrations")] == [1, 2, 3]
         assert c.execute("SELECT COUNT(*) n FROM permissions").fetchone()["n"] >= 13
 
 

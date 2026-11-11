@@ -7,6 +7,12 @@ tmp = tempfile.mkdtemp()
 os.environ["DB_PATH"] = os.path.join(tmp, "test.db")
 os.environ["WORKER_ENABLED"] = "0"
 os.environ["ADMIN_PASSWORD"] = "test-pass"
+# Uploaded proofs go to a throw-away folder, never into backend/data.
+os.environ["STORAGE_ROOT"] = os.path.join(tmp, "private_files")
+# The pre-Phase-1 tests submit the form without a proof or an income range. They keep testing exactly what they always
+# tested; the requirement itself is tested in test_p1_proof_income.py, which switches it on explicitly.
+os.environ["REQUIRE_PROOF"] = "0"
+os.environ["REQUIRE_INCOME_RANGE"] = "0"
 # Tests must NEVER contact anyone. Blank every delivery setting before the app is imported, so a real
 # SMTP_* / TELEGRAM_BOT_TOKEN in your terminal or .env cannot leak in (the test database holds real students).
 for _k in ("SMTP_HOST", "SMTP_USER", "SMTP_PASSWORD", "TELEGRAM_BOT_TOKEN"):

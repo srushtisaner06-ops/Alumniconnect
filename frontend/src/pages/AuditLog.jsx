@@ -36,6 +36,10 @@ export default function AuditLog() {
           <span className="space-x-2"><button className="btn-ghost" disabled={page <= 1} onClick={() => setPage(page - 1)}>Previous</button>
             <button className="btn-ghost" disabled={page * 50 >= data.total} onClick={() => setPage(page + 1)}>Next</button></span>
         </div></>)}
+
+      <div>
+
+      </div>
     </>
   )
 }

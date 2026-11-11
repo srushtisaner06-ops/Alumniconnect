@@ -2,6 +2,7 @@ import asyncio
 import csv
 import io
 import json
+import secrets
 import os
 import re
 from contextlib import asynccontextmanager
@@ -14,7 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 
-from . import accounts, audit, config, engine, importer, notifier, rbac, ratelimit, services, visibility
+from . import accounts, audit, careers, config, documents, engine, importer, income, notifier, profiles, rbac, ratelimit, services, storage, visibility
 from .db import db, init
 from .security import Principal, current_principal, optional_principal, require
 
@@ -58,6 +59,10 @@ async def lifespan(app):
             accounts.create_user(c, email=config.ADMIN_EMAIL, password=config.ADMIN_PASSWORD, role=rbac.ADMIN,
                                  full_name="Administrator", skip_password_policy=True)     # first-run seed only
         accounts.purge_old_sessions(c)
+        try:
+            documents.sweep_orphans(c)
+        except Exception as e:                     # storage trouble must never stop the app from starting
+            print("document sweep skipped:", e)
         # First run only: load the real placement sheet through the same validated importer.
         if os.getenv("AUTOLOAD_REFERENCE", "1") == "1" and not c.execute("SELECT 1 FROM alumni").fetchone() \
                 and config.REFERENCE_XLSX.exists():
@@ -86,6 +91,16 @@ async def _remember_client_ip(request: Request, call_next):
 
 @app.exception_handler(accounts.AccountError)
 async def _account_error(request: Request, exc: accounts.AccountError):
+    return JSONResponse({"detail": exc.message}, status_code=exc.status)
+
+
+@app.exception_handler(careers.CareerError)
+async def _career_error(request: Request, exc: careers.CareerError):
+    return JSONResponse({"detail": exc.message}, status_code=exc.status)
+
+
+@app.exception_handler(profiles.ProfileError)
+async def _profile_error(request: Request, exc: profiles.ProfileError):
     return JSONResponse({"detail": exc.message}, status_code=exc.status)
 
 
@@ -219,7 +234,7 @@ def password_reset_confirm(body: ResetConfirm):
 # ---------------------------------------------------------------- user management (ADMIN)
 class UserIn(BaseModel):
     email: str = Field(max_length=200)
-    password: str = Field(max_length=200)
+    password: Optional[str] = Field(None, max_length=200)     # omit it to send an invite: the person chooses their own password
     role: str
     full_name: Optional[str] = Field(None, max_length=120)
     alumni_id: Optional[int] = None
@@ -243,13 +258,40 @@ def users(who: Principal = Depends(require("user.manage"))):
         return {"items": accounts.list_users(c)}
 
 
+def _send_invite_email(email, raw_token):
+    body = ("An AlumniConnect account has been created for you.\n\n"
+            f"Open this link within {config.INVITE_HOURS} hours to choose your password:\n"
+            f"{config.PUBLIC_URL}/reset-password?token={raw_token}\n\n"
+            "If you were not expecting this, you can ignore this message.")
+    try:
+        notifier.send_email(email, "Your AlumniConnect account", body)
+    except Exception as e:
+        print("invite email failed:", e)
+
+
 @app.post("/api/users")
-def create_user(body: UserIn, who: Principal = Depends(require("user.manage"))):
+def create_user(body: UserIn, background: BackgroundTasks, who: Principal = Depends(require("user.manage"))):
+    """With a password: the account is ready to use. Without one: an invite. The person gets a link to choose their own
+    password, so an administrator never has to know or send one. If email is not set up the link is returned here, once,
+    for the administrator to pass on."""
+    invite = body.password is None
     with db() as c:
-        uid = accounts.create_user(c, email=body.email, password=body.password, role=body.role, full_name=body.full_name, alumni_id=body.alumni_id)
+        uid = accounts.create_user(c, email=body.email, password=body.password or secrets.token_urlsafe(24), role=body.role,
+                                   full_name=body.full_name, alumni_id=body.alumni_id, skip_password_policy=invite)
+        link = None
+        if invite:
+            _, raw = accounts.create_password_reset(c, body.email, minutes=config.INVITE_HOURS * 60)
+            link = f"{config.PUBLIC_URL}/reset-password?token={raw}"
         audit.record(c, "user.create", who, entity_type="user", entity_id=uid,
-                     detail={"email": accounts.normalize_email(body.email), "role": body.role, "alumni_id": body.alumni_id})
-    return {"id": uid}
+                     detail={"email": accounts.normalize_email(body.email), "role": body.role, "alumni_id": body.alumni_id, "invited": invite})
+    out = {"id": uid, "invited": invite}
+    if invite:
+        if notifier.email_configured():
+            background.add_task(_send_invite_email, accounts.normalize_email(body.email), link.split("token=")[1])
+            out["emailed"] = True
+        else:
+            out.update(emailed=False, invite_link=link)
+    return out
 
 
 @app.patch("/api/users/{uid}")
@@ -334,12 +376,13 @@ def export(scope: str = "submissions", format: str = "xlsx", who: Principal = De
                              d.get("company") or d.get("university") or d.get("startup_name") or "",
                              d.get("designation") or d.get("degree") or d.get("business_domain") or "",
                              d.get("industry") or d.get("country") or d.get("stage") or "",
-                             d.get("specialization") or d.get("notes") or ""])
+                             d.get("specialization") or d.get("notes") or "",
+                             a["income_label"] or "", (a["proof"] or {}).get("status", "MISSING")])
     if category:
         head = importer.headers(category)      # same headers as the reference sheet, so the export re-imports as-is
     else:
         head = ["Name", "PRN", "Graduation Year", "Email", "Phone", "Status", "Career Status", "Submitted At", "Reminders Sent",
-                "Company / University / Startup", "Designation / Degree / Domain", "Industry / Country / Stage", "Specialization / Notes"]
+                "Company / University / Startup", "Designation / Degree / Domain", "Industry / Country / Stage", "Specialization / Notes", "Income Range", "Proof Status"]
     fname = f"alumni_{scope}"
     with db() as c:
         audit.record(c, "export.run", who, entity_type="export", entity_id=scope, detail={"format": format, "rows": len(rows)})
@@ -414,6 +457,13 @@ def get_alumnus(aid: int, who: Principal = Depends(require("alumni.read"))):
             raise HTTPException(404, "Not found")
         d = services.alumnus_dict(c, r)
         d["link"] = f"{config.PUBLIC_URL}/update?token={d.pop('token')}"
+        if who.has("verification.review"):
+            d["documents"] = documents.history(c, aid)
+        d["profile"] = profiles.get(c, aid)
+        d["career_events"] = careers.list_events(c, aid)
+        if who.has("user.manage"):
+            u = c.execute("SELECT id,email,is_active,role FROM users WHERE alumni_id=?", (aid,)).fetchone()
+            d["account"] = {**dict(u), "is_active": bool(u["is_active"])} if u else None
         audit.record(c, "alumni.view", who, entity_type="alumni", entity_id=aid)
         d["history"] = [dict(x) for x in c.execute(
             "SELECT l.*, cm.name campaign FROM reminder_log l LEFT JOIN campaigns cm ON cm.id=l.campaign_id WHERE alumni_id=? ORDER BY l.id DESC LIMIT 20", (aid,))]
@@ -449,8 +499,10 @@ def delete_alumnus(aid: int, who: Principal = Depends(require("alumni.delete")))
         if not r:
             raise HTTPException(404, "Not found")
         services.push_undo(c, "delete_alumni", services.snapshot(c, aid), f"Deleted {r['name']}")
+        keys = documents.purge_alumni(c, aid)
         c.execute("DELETE FROM alumni WHERE id=?", (aid,))
-        audit.record(c, "alumni.delete", who, entity_type="alumni", entity_id=aid, detail={"name": r["name"]})
+        audit.record(c, "alumni.delete", who, entity_type="alumni", entity_id=aid, detail={"name": r["name"], "documents_removed": len(keys)})
+    documents.remove_files(keys)                   # after the commit, so a rollback never loses a file
     return {"ok": True}
 
 
@@ -524,8 +576,10 @@ async def import_commit(file: UploadFile = File(...), graduation_year: Optional[
     if fatal or (rep["errors"] and not skip_invalid):
         raise HTTPException(422, {"message": "File does not match the reference format", "report": _public_report(rep)})
     with db() as c:
+        doc_keys = []
         if replace:
             c.execute("DELETE FROM import_batches")   # their alumni are wiped below, so the file history goes too
+            doc_keys = documents.purge_all(c)
         imp = c.execute("INSERT INTO import_batches(filename,graduation_year,category) VALUES(?,?,?)",
                         ((file.filename or "upload")[:200], rep["graduation_year"], rep["category"])).lastrowid
         res = services.import_students(c, rep["students"], rep["graduation_year"], replace=replace,
@@ -535,6 +589,7 @@ async def import_commit(file: UploadFile = File(...), graduation_year: Optional[
         audit.record(c, "import.commit", who, entity_type="import", entity_id=imp,
                      detail={"filename": (file.filename or "upload")[:200], "category": rep["category"], "replace_all": replace,
                              "skip_invalid": skip_invalid, "added": res["added"], "updated": res["updated"]})
+    documents.remove_files(doc_keys)
     res["import_id"] = imp
     res["skipped_rows"] = len({e["row"] for e in rep["errors"] if e["row"]})
     return {"ok": True, **res, "unique_students": len(rep["students"]), "replaced": replace,
@@ -552,6 +607,7 @@ class CampaignIn(BaseModel):
     email_subject: str = DEFAULT_EMAIL_SUBJECT
     email_body: str = DEFAULT_EMAIL_BODY
     telegram_body: str = DEFAULT_TELEGRAM
+    purpose: str = "UPDATE"      # UPDATE = remind people who have not submitted; PROOF = remind people who have no proof on file
     # {"all": bool, "batches": [years], "import_ids": [ids], "alumni_ids": [ids]}.
     # Omitted (null) = leave unchanged on update / everyone on create (the behaviour before this feature).
     recipients: Optional[dict] = None
@@ -560,6 +616,8 @@ class CampaignIn(BaseModel):
 def _validate_campaign(b: CampaignIn):
     if b.channel not in ("email", "telegram", "both"):
         raise HTTPException(422, "channel must be email, telegram or both")
+    if b.purpose not in ("UPDATE", "PROOF"):
+        raise HTTPException(422, "purpose must be UPDATE or PROOF")
     bad = notifier.unknown_placeholders(b.email_subject, b.email_body, b.telegram_body)
     if bad:
         raise HTTPException(422, f"Unknown placeholder(s): {', '.join('{{' + x + '}}' for x in bad)}. "
@@ -604,12 +662,12 @@ def create_campaign(b: CampaignIn, who: Principal = Depends(require("campaign.ma
     _validate_campaign(b)
     deadline = b.deadline or (services.now() + timedelta(days=14)).strftime("%Y-%m-%d")
     with db() as c:
-        cid = c.execute("""INSERT INTO campaigns(name,channel,interval_hours,max_attempts,batch_size,deadline,email_subject,email_body,telegram_body)
-                           VALUES(?,?,?,?,?,?,?,?,?)""", (b.name, b.channel, b.interval_hours, b.max_attempts, b.batch_size, deadline,
-                                                           b.email_subject, b.email_body, b.telegram_body)).lastrowid
+        cid = c.execute("""INSERT INTO campaigns(name,channel,interval_hours,max_attempts,batch_size,deadline,email_subject,email_body,telegram_body,purpose)
+                           VALUES(?,?,?,?,?,?,?,?,?,?)""", (b.name, b.channel, b.interval_hours, b.max_attempts, b.batch_size, deadline,
+                                                            b.email_subject, b.email_body, b.telegram_body, b.purpose)).lastrowid
         if b.recipients is not None:
             services.save_selection(c, cid, services.normalize_selection(b.recipients))
-        audit.record(c, "campaign.create", who, entity_type="campaign", entity_id=cid, detail={"name": b.name, "channel": b.channel})
+        audit.record(c, "campaign.create", who, entity_type="campaign", entity_id=cid, detail={"name": b.name, "channel": b.channel, "purpose": b.purpose})
     return {"id": cid}
 
 
@@ -617,8 +675,11 @@ def create_campaign(b: CampaignIn, who: Principal = Depends(require("campaign.ma
 def update_campaign(cid: int, b: CampaignIn, who: Principal = Depends(require("campaign.manage"))):
     _validate_campaign(b)
     with db() as c:
-        if not c.execute("SELECT 1 FROM campaigns WHERE id=?", (cid,)).fetchone():
+        existing = c.execute("SELECT purpose FROM campaigns WHERE id=?", (cid,)).fetchone()
+        if not existing:
             raise HTTPException(404, "Not found")
+        if existing["purpose"] != b.purpose:       # who is being reminded of what would silently change under a running campaign
+            raise HTTPException(409, "A campaign's purpose cannot be changed. Create a new campaign instead.")
         c.execute("""UPDATE campaigns SET name=?,channel=?,interval_hours=?,max_attempts=?,batch_size=?,deadline=?,
                      email_subject=?,email_body=?,telegram_body=? WHERE id=?""",
                   (b.name, b.channel, b.interval_hours, b.max_attempts, b.batch_size, b.deadline, b.email_subject,
@@ -652,6 +713,7 @@ class PreviewIn(BaseModel):
     recipients: dict
     channel: str = "email"
     max_attempts: int = Field(3, ge=1, le=20)
+    purpose: str = "UPDATE"
 
 
 @app.post("/api/recipients/preview")
@@ -659,7 +721,8 @@ def recipient_preview(b: PreviewIn, who: Principal = Depends(require("campaign.m
     if b.channel not in ("email", "telegram", "both"):
         raise HTTPException(422, "channel must be email, telegram or both")
     with db() as c:
-        return services.preview_recipients(c, services.normalize_selection(b.recipients), b.channel, b.max_attempts)
+        return services.preview_recipients(c, services.normalize_selection(b.recipients), b.channel, b.max_attempts,
+                                           b.purpose if b.purpose in ("UPDATE", "PROOF") else "UPDATE")
 
 
 @app.post("/api/campaigns/{cid}/{action}")
@@ -694,6 +757,78 @@ def reminders(campaign_id: Optional[int] = None, limit: int = Query(100, le=500)
                              LEFT JOIN alumni al ON al.id=l.alumni_id LEFT JOIN campaigns cm ON cm.id=l.campaign_id
                              {w} ORDER BY l.id DESC LIMIT ?""", a + [limit]).fetchall()
         return {"items": [dict(r) for r in rows]}
+
+
+# ================================================================ proof documents
+@app.post("/api/public/proof", dependencies=[Depends(ratelimit.by_ip("public_write"))])
+async def public_proof(token: str = Form(...), career_status: str = Form(...), doc_type: str = Form(...), file: UploadFile = File(...)):
+    """The alumnus uploads proof through their personal link. Sent before the main submit, so the existing JSON submit is unchanged."""
+    ratelimit.check("public_token", token[:64])
+    data = await file.read(config.MAX_DOCUMENT_BYTES + 1)          # never read more than the limit allows
+    try:
+        with db() as c:
+            r = _by_token(c, token)
+            doc_id, stale = documents.add_proof(c, storage.get_storage(), r["id"], career_status, doc_type, file.filename, data, file.content_type)
+            audit.record(c, "document.upload", None, actor_email="(alumni link)", entity_type="alumni", entity_id=r["id"],
+                         detail={"document_id": doc_id, "category": career_status, "doc_type": doc_type, "bytes": len(data)})
+            proof = documents.current(c, r["id"])
+    except (documents.DocumentError, storage.StorageError) as e:
+        raise HTTPException(getattr(e, "status", 422), str(e))
+    documents.remove_files(stale)                                  # replaced uploads, removed only after the commit
+    return {"ok": True, "proof": proof}
+
+
+class ReviewIn(BaseModel):
+    decision: str
+    reason: Optional[str] = Field(None, max_length=500)
+
+
+@app.get("/api/verification")
+def verification_queue(status: str = "PENDING", category: str = "", search: str = "", page: int = 1,
+                       page_size: int = Query(25, le=100), who: Principal = Depends(require("verification.review"))):
+    if status not in ("all", "PENDING", "APPROVED", "REJECTED") or category not in ("", *documents.CATEGORIES):
+        raise HTTPException(422, "Unknown status or category")
+    with db() as c:
+        return documents.queue(c, status, category, search, page, page_size)
+
+
+@app.post("/api/documents/{doc_id}/review")
+def review_document(doc_id: int, body: ReviewIn, who: Principal = Depends(require("verification.review"))):
+    try:
+        with db() as c:
+            change = documents.review(c, doc_id, who.email, body.decision, body.reason)
+            audit.record(c, "document.review", who, entity_type="alumni", entity_id=change["alumni_id"],
+                         detail={"document_id": doc_id, "from": change["before"], "to": change["after"], "reason": body.reason})
+    except documents.DocumentError as e:
+        raise HTTPException(e.status, e.message)
+    return {"ok": True, "status": body.decision}
+
+
+@app.get("/api/documents/{doc_id}/download")
+def download_document(doc_id: int, who: Principal = Depends(current_principal)):
+    """Staff with review permission, or the alumnus the document belongs to. Everyone else gets 404 (not 403)."""
+    with db() as c:
+        r = documents.get(c, doc_id)
+        if not r or not (who.has("verification.review") or (who.alumni_id is not None and who.alumni_id == r["alumni_id"])):
+            raise HTTPException(404, "Document not found")
+        audit.record(c, "document.download", who, entity_type="alumni", entity_id=r["alumni_id"], detail={"document_id": doc_id})
+    try:
+        data = storage.get_storage().get(r["storage_key"])
+    except storage.StorageError:
+        raise HTTPException(404, "The stored file is missing")
+    safe = re.sub(r"[^A-Za-z0-9._ -]", "_", r["original_name"])[:100] or "document"
+    return Response(data, media_type=r["content_type"], headers={
+        "Content-Disposition": f'attachment; filename="{safe}"',
+        "X-Content-Type-Options": "nosniff",          # the browser must not guess a different (executable) type
+        "Cache-Control": "no-store",
+        "Content-Security-Policy": "default-src 'none'; sandbox"})
+
+
+@app.get("/api/profile/me/documents")
+def my_documents(who: Principal = Depends(require("profile.own.read"))):
+    aid = _own_alumni_id(who)
+    with db() as c:
+        return {"items": documents.history(c, aid, staff=False)}
 
 
 # ================================================================ personal links (staff)
@@ -784,6 +919,104 @@ def view_profile(aid: int, request: Request, viewer: Optional[Principal] = Depen
     return shaped
 
 
+class ProfileIn(BaseModel):
+    whatsapp: Optional[str] = None
+    country: Optional[str] = None
+    city: Optional[str] = None
+    professional_domain: Optional[str] = None
+    years_experience: Optional[float] = None
+    designation: Optional[str] = None
+    headline: Optional[str] = None
+    linkedin_url: Optional[str] = None
+    github_url: Optional[str] = None
+    portfolio_url: Optional[str] = None
+    skills: Optional[list[str]] = None
+    interests: Optional[list[str]] = None
+
+
+class EventIn(BaseModel):
+    event_type: str
+    title: str = Field(max_length=300)
+    event_date: Optional[str] = None
+    organisation: Optional[str] = Field(None, max_length=300)
+    detail: Optional[str] = Field(None, max_length=2000)
+
+
+class RetractIn(BaseModel):
+    reason: str = Field(max_length=300)
+
+
+def _supplied(model):
+    return getattr(model, "model_dump", model.dict)(exclude_unset=True)
+
+
+def _save_profile(aid, body, who):
+    with db() as c:
+        if not c.execute("SELECT 1 FROM alumni WHERE id=?", (aid,)).fetchone():
+            raise HTTPException(404, "Not found")
+        changed = profiles.save(c, aid, _supplied(body), who.email)
+        audit.record(c, "profile.update", who, entity_type="alumni", entity_id=aid, detail={"fields": changed})   # names only, never values
+        return profiles.get(c, aid)
+
+
+def _add_event(aid, body, who, source):
+    if body.event_type not in careers.USER_TYPES:
+        raise HTTPException(422, "Choose one of: " + ", ".join(careers.TYPES[t] for t in careers.USER_TYPES))
+    with db() as c:
+        if not c.execute("SELECT 1 FROM alumni WHERE id=?", (aid,)).fetchone():
+            raise HTTPException(404, "Not found")
+        eid = careers.add_event(c, aid, body.event_type, body.title, event_date=body.event_date, organisation=body.organisation,
+                                detail=body.detail, source=source, by=who.email)
+        audit.record(c, "career.add", who, entity_type="alumni", entity_id=aid, detail={"event_id": eid, "type": body.event_type})
+    return {"id": eid}
+
+
+def _retract_event(aid, eid, body, who):
+    with db() as c:
+        careers.retract(c, eid, who.email, body.reason, alumni_id=aid)
+        audit.record(c, "career.retract", who, entity_type="alumni", entity_id=aid, detail={"event_id": eid})
+    return {"ok": True}
+
+
+@app.put("/api/profile/me/details")
+def my_profile_details(body: ProfileIn, who: Principal = Depends(require("profile.own.write"))):
+    return _save_profile(_own_alumni_id(who), body, who)
+
+
+@app.put("/api/alumni/{aid}/profile")
+def staff_profile_details(aid: int, body: ProfileIn, who: Principal = Depends(require("alumni.write"))):
+    return _save_profile(aid, body, who)
+
+
+@app.post("/api/profile/me/career-events")
+def my_add_event(body: EventIn, who: Principal = Depends(require("profile.own.write"))):
+    return _add_event(_own_alumni_id(who), body, who, "PROFILE")
+
+
+@app.post("/api/alumni/{aid}/career-events")
+def staff_add_event(aid: int, body: EventIn, who: Principal = Depends(require("alumni.write"))):
+    return _add_event(aid, body, who, "STAFF")
+
+
+@app.post("/api/profile/me/career-events/{eid}/retract")
+def my_retract_event(eid: int, body: RetractIn, who: Principal = Depends(require("profile.own.write"))):
+    return _retract_event(_own_alumni_id(who), eid, body, who)
+
+
+@app.post("/api/alumni/{aid}/career-events/{eid}/retract")
+def staff_retract_event(aid: int, eid: int, body: RetractIn, who: Principal = Depends(require("alumni.write"))):
+    return _retract_event(aid, eid, body, who)
+
+
+@app.get("/api/directory")
+def member_directory(search: str = "", batch: Optional[int] = Query(None, ge=1990, le=2100), page: int = 1,
+                     page_size: int = Query(24, le=60), who: Principal = Depends(require("directory.read"))):
+    """Browse alumni who chose to be seen by this viewer's role. Search covers name, organisation, domain, city, country,
+    designation and skills. (Richer filters and sorting arrive with Phase 2.)"""
+    with db() as c:
+        return visibility.directory(c, who, search, batch, page, page_size)
+
+
 # ================================================================ public alumni portal (token only)
 LINK_GONE = {"expired": "This link has expired. Please ask the department to send you a new one.",
              "revoked": "This link has been disabled. Please ask the department to send you a new one."}
@@ -815,15 +1048,23 @@ def public_form(token: str):
             prefill = {"kind": "HIGHER_STUDIES", "source": "higher studies", "university": hs["institution"], "degree": hs["degree"]}
         elif ent:
             prefill = {"kind": "ENTREPRENEURSHIP", "source": "entrepreneurship", "startup_name": ent["company"]}
+        proof = documents.current(c, r["id"])
         return {"name": r["name"], "graduation_year": r["graduation_year"], "prn": r["prn"], "status": r["status"],
                 "career_status": r["career_status"], "details": json.loads(r["details"]) if r["details"] else None,
-                "prefill": prefill}
+                "prefill": prefill,
+                # Phase 1: proof upload + income range. The server owns the lists, so the form never drifts from the rules.
+                "requirements": {"proof": config.REQUIRE_PROOF, "income": config.REQUIRE_INCOME_RANGE},
+                "income_bands": income.for_form(), "income_band": r["income_band"],
+                "proof_types": documents.for_form(), "proof": proof,
+                "max_upload_mb": config.MAX_DOCUMENT_BYTES // (1024 * 1024)}
 
 
 class Submission(BaseModel):
     token: str
     career_status: str
     details: dict
+    income_band: Optional[str] = None      # a code from income.BANDS for this career type
+    consent: bool = False                  # agrees to proof + income being collected for verification and statistics
 
 
 REQUIRED = {"EMPLOYMENT": ["company", "designation", "industry"],
@@ -852,11 +1093,31 @@ def public_submit(b: Submission):
             clean[k] = v
     if b.career_status == "ENTREPRENEURSHIP" and clean["stage"] not in STAGES:
         raise HTTPException(422, "Invalid stage")
+    if b.income_band:
+        if not income.valid(b.career_status, b.income_band):
+            raise HTTPException(422, "Choose one of the listed income ranges")
+    elif config.REQUIRE_INCOME_RANGE:
+        raise HTTPException(422, "Please select your income range: " + income.BANDS[b.career_status][0].lower())
+    if (config.REQUIRE_PROOF or config.REQUIRE_INCOME_RANGE or b.income_band) and not b.consent:
+        raise HTTPException(422, "Please tick the box to confirm you agree to your proof and income range being used for verification")
     with db() as c:
         r = _by_token(c, b.token)
+        if config.REQUIRE_PROOF:
+            p = documents.current(c, r["id"])
+            if not p:
+                raise HTTPException(422, "Please upload a proof of your " + {"EMPLOYMENT": "employment", "HIGHER_STUDIES": "admission",
+                                                                         "ENTREPRENEURSHIP": "venture"}[b.career_status])
+            if p["category"] != b.career_status:
+                raise HTTPException(422, "The proof you uploaded is for a different option. Please upload a proof for your current choice.")
+            if p["status"] == documents.REJECTED:
+                raise HTTPException(422, f"Your proof was not accepted: {p['rejection_reason']}. Please upload a new one.")
         again = r["status"] == "COMPLETED"
-        c.execute("UPDATE alumni SET status='COMPLETED', career_status=?, details=?, submitted_at=datetime('now') WHERE id=?",
-                  (b.career_status, json.dumps(clean), r["id"]))
+        c.execute("UPDATE alumni SET status='COMPLETED', career_status=?, details=?, submitted_at=datetime('now'),"
+                  " income_band=COALESCE(?, income_band), income_updated_at=CASE WHEN ? IS NULL THEN income_updated_at ELSE datetime('now') END,"
+                  " verification_consent_at=CASE WHEN ? THEN datetime('now') ELSE verification_consent_at END WHERE id=?",
+                  (b.career_status, json.dumps(clean), b.income_band, b.income_band, int(b.consent), r["id"]))
         audit.record(c, "public.submit", None, actor_email="(alumni link)", entity_type="alumni", entity_id=r["id"],
-                     detail={"career_status": b.career_status, "resubmission": again})
+                     detail={"career_status": b.career_status, "resubmission": again, "income_band": b.income_band, "consent": b.consent})
+        careers.record_submission(c, r["id"], b.career_status, clean)         # only writes what actually changed
+        profiles.fill_from_submission(c, r["id"], b.career_status, clean)    # blanks only; never overwrites a chosen value
     return {"ok": True, "already_submitted": again}

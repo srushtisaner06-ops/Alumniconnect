@@ -27,13 +27,14 @@ PERMISSIONS = {
     "report.view": "View dashboard and analytics",
     "user.manage": "Create users, change roles, disable accounts, end sessions",
     "audit.view": "Read the audit log",
+    "verification.review": "Open proof documents and approve or reject them",
     "profile.own.read": "View my own profile and privacy setting",
     "profile.own.write": "Change my own privacy setting",
     "directory.read": "Browse profiles that are visible to my role",
 }
 
 _STAFF = {"alumni.read", "alumni.write", "alumni.link.manage", "import.run", "export.run", "campaign.manage",
-          "report.view", "directory.read"}
+          "report.view", "directory.read", "verification.review"}
 
 ROLE_PERMISSIONS = {
     ADMIN: set(PERMISSIONS),

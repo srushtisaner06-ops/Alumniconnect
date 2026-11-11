@@ -5,10 +5,19 @@ import { Badge, CATEGORIES, ErrorBox, PageHeader, Spinner, fmtDate, useLoad, use
 
 const tone = { RUNNING: 'green', PAUSED: 'amber', DRAFT: 'slate', COMPLETED: 'blue' }
 const BLANK = {
-  name: '', channel: 'email', interval_hours: 72, max_attempts: 3, batch_size: 20, deadline: '',
+  name: '', purpose: 'UPDATE', channel: 'email', interval_hours: 72, max_attempts: 3, batch_size: 20, deadline: '',
   email_subject: 'Please update your career details – {{batch}} batch',
   email_body: 'Dear {{name}},\n\nThe department is collecting career information from the {{batch}} batch for accreditation reports. It takes about two minutes.\n\nYour personal link:\n{{unique_link}}\n\nWant reminders on Telegram instead? Open this link and press Start:\n{{telegram_link}}\n\nThank you,\nDepartment of Computer Science (AI)',
   telegram_body: 'Hi {{name}}, please update your career details ({{batch}} batch): {{unique_link}}'
+}
+
+// A round is either the usual "please update your details" reminder, or a "please upload your proof" reminder for people who
+// already submitted the form but have no proof on file (or whose proof was not accepted).
+const PURPOSES = { UPDATE: 'Ask for career details (people who have not submitted yet)', PROOF: 'Ask for proof (people who submitted but have no accepted proof)' }
+const PROOF_TEXT = {
+  email_subject: 'Please upload your proof of employment or studies – {{batch}} batch',
+  email_body: 'Dear {{name}},\n\nThank you for sharing your career details. To complete your record, please upload one proof (for example your joining email, company or university ID card, or a registration certificate). It takes about two minutes.\n\nYour personal link:\n{{unique_link}}\n\nOnly the department staff can see what you upload.',
+  telegram_body: 'Hi {{name}}, please upload a proof to complete your record ({{batch}} batch): {{unique_link}}',
 }
 
 const EMPTY_SEL = { all: false, batches: [], import_ids: [], alumni_ids: [] }
@@ -60,7 +69,7 @@ export default function Campaigns() {
           <div key={c.id} className="card">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div><div className="flex items-center gap-2"><h2 className="text-2xl font-semibold">{c.name}</h2><Badge tone={tone[c.status]}>{c.status}</Badge></div>
-                <p className="mt-1 text-xs text-slate-500">{c.channel} · every {c.interval_hours} h · max {c.max_attempts} attempts · batch {c.batch_size} · deadline {c.deadline || '—'}</p>
+                <p className="mt-1 text-xs text-slate-500">{c.purpose === 'PROOF' && <Badge tone="indigo">Proof</Badge>} {c.channel} · every {c.interval_hours} h · max {c.max_attempts} attempts · batch {c.batch_size} · deadline {c.deadline || '—'}</p>
                 <p className="mt-0.5 flex items-center gap-1 text-xs text-slate-500"><Users className="h-3 w-3" />Recipients: {describeRecipients(c.recipients)} · {c.recipient_total ?? 0} {c.recipient_total === 1 ? 'alumnus' : 'alumni'}</p></div>
               <div className="flex flex-wrap gap-2">
                 {c.status === 'RUNNING' ? <>
@@ -95,7 +104,7 @@ export default function Campaigns() {
   )
 }
 
-function RecipientPicker({ sel, setSel, people, setPeople, channel, maxAttempts }) {
+function RecipientPicker({ sel, setSel, people, setPeople, channel, maxAttempts, purpose }) {
   const opts = useLoad(() => api('/recipients/options'), [])
   const [q, setQ] = useState('')
   const [hits, setHits] = useState([])
@@ -115,10 +124,10 @@ function RecipientPicker({ sel, setSel, people, setPeople, channel, maxAttempts 
     if (empty) { setPv(null); setPvErr(null); return }
     let live = true
     setPv(null)
-    const h = setTimeout(() => api('/recipients/preview', { method: 'POST', body: { recipients: sel, channel, max_attempts: +maxAttempts || 3 } })
+    const h = setTimeout(() => api('/recipients/preview', { method: 'POST', body: { recipients: sel, channel, max_attempts: +maxAttempts || 3, purpose } })
       .then((r) => { if (live) { setPv(r); setPvErr(null) } }).catch((e) => { if (live) setPvErr(e) }), 300)
     return () => { live = false; clearTimeout(h) }
-  }, [JSON.stringify(sel), channel, maxAttempts]) // eslint-disable-line
+  }, [JSON.stringify(sel), channel, maxAttempts, purpose]) // eslint-disable-line
 
   const add = (p) => {
     if (!sel.alumni_ids.includes(p.id)) {
@@ -204,7 +213,8 @@ function RecipientPicker({ sel, setSel, people, setPeople, channel, maxAttempts 
             : !pv ? <p className="mt-1 flex items-center gap-2 text-slate-500"><Loader2 className="h-4 w-4 animate-spin" />Calculating…</p>
               : <>
                 <p className="mt-1 text-lg font-semibold tabular-nums">{pv.selected} {pv.selected === 1 ? 'alumnus' : 'alumni'} selected</p>
-                <p className="text-slate-600"><strong className="tabular-nums">{pv.eligible}</strong> eligible · {pv.completed} already completed · {pv.unsubscribed} unsubscribed
+                <p className="text-slate-600"><strong className="tabular-nums">{pv.eligible}</strong> eligible · {pv.completed} {purpose === 'PROOF' ? 'already have a proof' : 'already completed'} · {pv.unsubscribed} unsubscribed
+                  {pv.not_submitted > 0 && ` · ${pv.not_submitted} have not submitted the form yet (send them a normal round first)`}
                   {pv.no_contact > 0 && ` · ${pv.no_contact} with no usable ${via}`}{pv.attempts_used > 0 && ` · ${pv.attempts_used} reached max attempts`}</p>
               </>}
       </div>
@@ -243,6 +253,13 @@ function Editor({ initial, placeholders, onClose, onSaved }) {
         <h2 className="text-3xl font-semibold">{f.id ? 'Edit round' : 'New round'}</h2>
         <ErrorBox error={err} />
         <div><label className="label" htmlFor="n">Name</label><input id="n" required className="input" value={f.name} onChange={set('name')} /></div>
+        <div><label className="label" htmlFor="pp">What is this round for?</label>
+          {f.id ? <p className="text-sm text-slate-600">{PURPOSES[f.purpose || 'UPDATE']} <span className="text-slate-400">(cannot be changed once created)</span></p> : (
+            <select id="pp" className="input" value={f.purpose || 'UPDATE'} onChange={(e) => {
+              const p = e.target.value
+              const untouched = (f.purpose || 'UPDATE') === 'UPDATE' ? ['email_subject', 'email_body', 'telegram_body'].every((k) => f[k] === BLANK[k]) : ['email_subject', 'email_body', 'telegram_body'].every((k) => f[k] === PROOF_TEXT[k])
+              setF({ ...f, purpose: p, ...(untouched ? (p === 'PROOF' ? PROOF_TEXT : { email_subject: BLANK.email_subject, email_body: BLANK.email_body, telegram_body: BLANK.telegram_body }) : {}) })
+            }}>{Object.entries(PURPOSES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>)}</div>
         <div className="grid gap-3 sm:grid-cols-4">
           <div><label className="label" htmlFor="ch">Channel</label><select id="ch" className="input" value={f.channel} onChange={set('channel')}><option value="email">Email</option><option value="telegram">Telegram</option><option value="both">Both</option></select></div>
           <div><label className="label" htmlFor="iv">Interval (hours)</label><input id="iv" type="number" min="0.01" step="any" className="input" value={f.interval_hours} onChange={set('interval_hours')} /></div>
@@ -251,7 +268,7 @@ function Editor({ initial, placeholders, onClose, onSaved }) {
         </div>
         <div><label className="label" htmlFor="dl">Submission deadline <span className="font-normal text-slate-500">(pending after this date count as overdue; blank = 14 days from now)</span></label>
           <input id="dl" type="date" className="input sm:w-48" value={f.deadline} onChange={set('deadline')} /></div>
-        <RecipientPicker sel={sel} setSel={setSel} people={people} setPeople={setPeople} channel={f.channel} maxAttempts={f.max_attempts} />
+        <RecipientPicker sel={sel} setSel={setSel} people={people} setPeople={setPeople} channel={f.channel} maxAttempts={f.max_attempts} purpose={f.purpose || 'UPDATE'} />
         <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-500">Placeholders: {chips}</div>
         {f.channel !== 'telegram' && <>
           <div><label className="label" htmlFor="es">Email subject</label><input id="es" className="input" value={f.email_subject} onChange={set('email_subject')} /></div>
