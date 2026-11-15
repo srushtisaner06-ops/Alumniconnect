@@ -15,7 +15,7 @@ is private until someone deliberately allows it here.
 """
 from datetime import datetime, timezone
 
-from . import careers, profiles, rbac
+from . import careers, filters, profiles, rbac
 
 PRIVATE, ALUMNI_ONLY, INSTITUTION, PUBLIC = "PRIVATE", "ALUMNI_ONLY", "INSTITUTION", "PUBLIC"
 LEVELS = (PRIVATE, ALUMNI_ONLY, INSTITUTION, PUBLIC)
@@ -94,16 +94,32 @@ def levels_visible_to(principal):
     return {lvl for lvl, audience in _AUDIENCE.items() if role in audience}
 
 
-def directory(c, principal, search="", batch=None, page=1, page_size=24):
-    """Profiles this viewer may browse, in the member view (staff browsing here see exactly what a student would;
-    their full tools are the Alumni directory). A person always appears to themself."""
+def _visible_scope(principal):
+    """SQL condition (over `a` and `v`) for the profiles this viewer may browse, plus its arguments."""
     levels = sorted(levels_visible_to(principal))
     own = principal.alumni_id if principal and principal.alumni_id else None
-    where = [f"(COALESCE(v.level,'PRIVATE') IN ({','.join('?' * len(levels))})" + (" OR a.id=?)" if own else ")")]
-    args = levels + ([own] if own else [])
-    if batch:
-        where.append("a.graduation_year=?")
-        args.append(int(batch))
+    sql = f"(COALESCE(v.level,'PRIVATE') IN ({','.join('?' * len(levels))})" + (" OR a.id=?)" if own else ")")
+    return sql, levels + ([own] if own else [])
+
+
+def directory_options(c, principal):
+    """Dropdown values (batches, domains) drawn only from profiles this viewer may see."""
+    sql, args = _visible_scope(principal)
+    return filters.options(c, sql, args)
+
+
+def directory(c, principal, search="", batch=None, page=1, page_size=24, career=None, organisation="", domain="", sort="name"):
+    """Profiles this viewer may browse, in the member view (staff browsing here see exactly what a student would;
+    their full tools are the Alumni directory). A person always appears to themself.
+
+    Phase 2 filters (batch, career, organisation, domain) and sorting (name / graduation year) come from filters.py.
+    Raises filters.FilterError for a value that is not allowed."""
+    scope, args = _visible_scope(principal)
+    where = [scope]
+    extra, extra_args = filters.conditions(batch, career, organisation, domain)
+    where += extra
+    args = args + extra_args
+    order = filters.order_by(sort, "name")
     term = (search or "").strip()
     if term:
         like = f"%{term}%"
@@ -115,7 +131,7 @@ def directory(c, principal, search="", batch=None, page=1, page_size=24):
         args += [like] * 9
     base = f"FROM alumni a LEFT JOIN profile_visibility v ON v.alumni_id=a.id WHERE {' AND '.join(where)}"
     total = c.execute(f"SELECT COUNT(*) n {base}", args).fetchone()["n"]
-    rows = c.execute(f"SELECT a.* {base} ORDER BY a.name COLLATE NOCASE LIMIT ? OFFSET ?", args + [page_size, (max(page, 1) - 1) * page_size]).fetchall()
+    rows = c.execute(f"SELECT a.* {base} ORDER BY {order} LIMIT ? OFFSET ?", args + [page_size, (max(page, 1) - 1) * page_size]).fetchall()
     return {"items": [member_view(c, r) for r in rows], "total": total, "page": page, "page_size": page_size}
 
 

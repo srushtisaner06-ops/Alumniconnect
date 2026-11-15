@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { CheckCircle2, Clock, Percent, Users, AlertTriangle, ArrowRight, Briefcase, GraduationCap, Rocket } from 'lucide-react'
 import { api } from '../api'
 import { Badge, ErrorBox, PageHeader, Progress, Spinner, Stat, useLoad } from '../ui.jsx'
+import { BarChart } from '../charts.jsx'
 
 const QUICK = [
   { to: '/dashboard/alumni/import', title: 'Import records', text: 'Bring in placement, higher-studies and entrepreneurship sheets.', art: '/img/art-upload.svg' },
@@ -15,7 +16,7 @@ export default function Dashboard() {
   const { data, error, loading, reload } = useLoad(() => api('/dashboard'))
   if (loading) return <Spinner />
   if (error) return <ErrorBox error={error} retry={reload} />
-  const s = data.summary, p = data.placement, pr = data.progression
+  const s = data.summary, p = data.placement, pr = data.progression, dom = data.by_domain
   return (
     <>
       <PageHeader eyebrow="Alumni network" title={<>Keep every graduate <span className="text-indigo-600">connected</span></>}
@@ -51,6 +52,19 @@ export default function Dashboard() {
           {pr.total} student{pr.total === 1 ? '' : 's'} counted once across the three categories
           {pr.index != null ? ` · placement index (X+Y+Z)/FS = ${pr.total}/${pr.final_year_students} = ${pr.index}%` : ' · import the placement sheet (with its Summary tab) to compute the placement index'}.
         </p>
+      </section>
+
+      <section className="mt-20">
+        <div className="mb-8"><h2 className="section-title text-3xl">Alumni at a glance</h2><div className="silver-mark mt-3 w-24" /></div>
+        <div className="grid gap-x-14 gap-y-12 lg:grid-cols-3">
+          <div><h3 className="mb-4 text-sm font-semibold uppercase tracking-wide text-slate-500">By graduation batch</h3>
+            <BarChart rows={data.by_batch.map((b) => ({ label: `Batch ${b.year}`, value: b.total }))} empty="No alumni imported yet." /></div>
+          <div><h3 className="mb-4 text-sm font-semibold uppercase tracking-wide text-slate-500">Placement · higher studies · entrepreneurship</h3>
+            <BarChart rows={[{ label: 'Placement', value: pr.placed }, { label: 'Higher studies', value: pr.higher_studies }, { label: 'Entrepreneurship', value: pr.entrepreneurship }]} empty="No career records imported yet." /></div>
+          <div><h3 className="mb-4 text-sm font-semibold uppercase tracking-wide text-slate-500">By professional domain</h3>
+            <BarChart rows={dom.items.map((d) => ({ label: d.domain, value: d.alumni }))} empty="No professional domains recorded yet." />
+            {dom.items.length > 0 && dom.without_domain > 0 && <p className="mt-3 text-xs text-slate-500">{dom.without_domain} alumni have no domain on their profile yet.</p>}</div>
+        </div>
       </section>
 
       <section className="mt-20 grid gap-x-16 gap-y-12 lg:grid-cols-2">

@@ -15,7 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 
-from . import accounts, audit, careers, config, documents, engine, importer, income, notifier, profiles, rbac, ratelimit, services, storage, visibility
+from . import accounts, audit, careers, config, documents, engine, filters, importer, income, notifier, profiles, rbac, ratelimit, services, storage, visibility
 from .db import db, init
 from .security import Principal, current_principal, optional_principal, require
 
@@ -405,38 +405,60 @@ def export(scope: str = "submissions", format: str = "xlsx", who: Principal = De
 
 
 # ================================================================ alumni
-@app.get("/api/alumni")
-def list_alumni(search: str = "", status: str = "all", category: str = "all", page: int = 1, page_size: int = Query(25, le=100), who: Principal = Depends(require("alumni.read"))):
-    q = search.strip()
+def _alumni_where(c, search, status, category, batch, organisation, domain):
+    """The WHERE clause shared by the staff directory list and its filtered export (so they always agree)."""
+    q = (search or "").strip()
     where, args = [], []
     if category != "all" and category not in services.CATEGORY_TABLES:
         raise HTTPException(422, "category must be all|PLACEMENT|HIGHER_STUDIES|ENTREPRENEURSHIP")
+    if importer.PRN_RE.fullmatch(q):         # PRN lookup
+        recs = [dict(r) for r in c.execute("SELECT id,prn FROM alumni")]
+        hit = engine.search_prn(recs, q)
+        where.append("a.id=?")
+        args.append(hit if hit is not None else -1)
+    elif q:
+        like = f"%{q}%"
+        where.append("(a.name LIKE ? OR a.prn LIKE ? OR a.email LIKE ? OR a.id IN (SELECT alumni_id FROM offers WHERE employer LIKE ?)"
+                     " OR a.id IN (SELECT alumni_id FROM higher_studies WHERE institution LIKE ? OR degree LIKE ?)"
+                     " OR a.id IN (SELECT alumni_id FROM ventures WHERE company LIKE ?))")
+        args += [like] * 7
+    # Phase 2 filters: graduation batch, career status (= category), company / institution, professional domain.
+    try:
+        extra, extra_args = filters.conditions(batch, None if category == "all" else category, organisation, domain)
+    except filters.FilterError as e:
+        raise HTTPException(422, str(e))
+    where += extra
+    args += extra_args
+    cutoff = services.overdue_cutoff(c)
+    today = services.now().strftime("%Y-%m-%d")
+    is_overdue = bool(cutoff and cutoff < today)
+    if status == "COMPLETED":
+        where.append("a.status='COMPLETED'")
+    elif status == "OVERDUE":
+        where.append("a.status='PENDING'" if is_overdue else "0")
+    elif status == "PENDING":
+        where.append("a.status='PENDING'" + (" AND 0" if is_overdue else ""))
+    return (("WHERE " + " AND ".join(where)) if where else ""), args
+
+
+def _alumni_order(sort):
+    if not (sort or "").strip():
+        return "a.sr_no, a.id"               # the original order, unchanged unless a sort is chosen
+    try:
+        return filters.order_by(sort)
+    except filters.FilterError as e:
+        raise HTTPException(422, str(e))
+
+
+@app.get("/api/alumni")
+def list_alumni(search: str = "", status: str = "all", category: str = "all", page: int = 1, page_size: int = Query(25, le=100),
+                batch: Optional[int] = Query(None, ge=1990, le=2100), organisation: str = "", domain: str = "", sort: str = "",
+                who: Principal = Depends(require("alumni.read"))):
     with db() as c:
-        if importer.PRN_RE.fullmatch(q):         # PRN lookup
-            recs = [dict(r) for r in c.execute("SELECT id,prn FROM alumni")]
-            hit = engine.search_prn(recs, q)
-            where.append("a.id=?")
-            args.append(hit if hit is not None else -1)
-        elif q:
-            like = f"%{q}%"
-            where.append("(a.name LIKE ? OR a.prn LIKE ? OR a.email LIKE ? OR a.id IN (SELECT alumni_id FROM offers WHERE employer LIKE ?)"
-                         " OR a.id IN (SELECT alumni_id FROM higher_studies WHERE institution LIKE ? OR degree LIKE ?)"
-                         " OR a.id IN (SELECT alumni_id FROM ventures WHERE company LIKE ?))")
-            args += [like] * 7
-        if category != "all":
-            where.append(f"EXISTS (SELECT 1 FROM {services.CATEGORY_TABLES[category]} t WHERE t.alumni_id=a.id)")
-        cutoff = services.overdue_cutoff(c)
-        today = services.now().strftime("%Y-%m-%d")
-        is_overdue = bool(cutoff and cutoff < today)
-        if status == "COMPLETED":
-            where.append("a.status='COMPLETED'")
-        elif status == "OVERDUE":
-            where.append("a.status='PENDING'" if is_overdue else "0")
-        elif status == "PENDING":
-            where.append("a.status='PENDING'" + (" AND 0" if is_overdue else ""))
-        w = ("WHERE " + " AND ".join(where)) if where else ""
+        w, args = _alumni_where(c, search, status, category, batch, organisation, domain)
+        order = _alumni_order(sort)
         total = c.execute(f"SELECT COUNT(*) n FROM alumni a {w}", args).fetchone()["n"]
-        rows = c.execute(f"SELECT a.* FROM alumni a {w} ORDER BY a.sr_no, a.id LIMIT ? OFFSET ?",
+        rows = c.execute(f"SELECT a.* FROM alumni a {w} ORDER BY {order} LIMIT ? OFFSET ?",
                          args + [page_size, (max(page, 1) - 1) * page_size]).fetchall()
         items = []
         for r in rows:
@@ -447,6 +469,47 @@ def list_alumni(search: str = "", status: str = "all", category: str = "all", pa
         for cat, table in services.CATEGORY_TABLES.items():
             counts[cat] = c.execute(f"SELECT COUNT(DISTINCT alumni_id) n FROM {table}").fetchone()["n"]
     return {"items": items, "total": total, "page": page, "page_size": page_size, "category_counts": counts}
+
+
+# NOTE: the two fixed paths below must stay above "/api/alumni/{aid}", or "export" would be read as an id.
+@app.get("/api/alumni/filters")
+def alumni_filter_options(who: Principal = Depends(require("alumni.read"))):
+    """Values for the staff directory's batch and domain dropdowns."""
+    with db() as c:
+        return filters.options(c)
+
+
+def _csv_safe(v):
+    """Stop spreadsheet programs from running a cell as a formula (names or companies starting with = + - @)."""
+    v = "" if v is None else v
+    return "'" + v if isinstance(v, str) and v[:1] in ("=", "+", "-", "@") else v
+
+
+@app.get("/api/alumni/export")
+def export_alumni(search: str = "", status: str = "all", category: str = "all", batch: Optional[int] = Query(None, ge=1990, le=2100),
+                  organisation: str = "", domain: str = "", sort: str = "",
+                  who: Principal = Depends(require("export.run"))):
+    """CSV of exactly the alumni the staff directory shows for the same filters (all pages, not just the current one)."""
+    with db() as c:
+        w, args = _alumni_where(c, search, status, category, batch, organisation, domain)
+        order = _alumni_order(sort)
+        rows = []
+        for r in c.execute(f"SELECT a.* FROM alumni a {w} ORDER BY {order}", args).fetchall():
+            d = services.alumnus_dict(c, r)
+            rows.append([d["sr_no"], d["name"], d["prn"], d["graduation_year"], d["email"], d["phone"],
+                         ", ".join(services.CATEGORY_LABELS[x] for x in d["categories"]),
+                         "; ".join(visibility.organisations(c, d["id"])),
+                         profiles.get(c, d["id"])["professional_domain"] or "",
+                         "Completed" if d["status"] == "COMPLETED" else ("Overdue" if d["overdue"] else "Pending")])
+        applied = {k: v for k, v in {"search": search.strip(), "status": status, "category": category, "batch": batch,
+                                     "organisation": organisation.strip(), "domain": domain.strip(), "sort": sort}.items() if v not in ("", None, "all")}
+        audit.record(c, "export.run", who, entity_type="export", entity_id="directory", detail={"format": "csv", "rows": len(rows), "filters": applied})
+    buf = io.StringIO()
+    w_ = csv.writer(buf)
+    w_.writerow(["Sr No", "Name", "PRN", "Graduation Year", "Email", "Phone", "Career status", "Company / institution", "Professional domain", "Submission status"])
+    w_.writerows([[_csv_safe(v) for v in row] for row in rows])
+    return Response(buf.getvalue().encode("utf-8-sig"), media_type="text/csv",
+                    headers={"Content-Disposition": 'attachment; filename="alumni_directory.csv"'})
 
 
 @app.get("/api/alumni/{aid}")
@@ -1010,11 +1073,23 @@ def staff_retract_event(aid: int, eid: int, body: RetractIn, who: Principal = De
 
 @app.get("/api/directory")
 def member_directory(search: str = "", batch: Optional[int] = Query(None, ge=1990, le=2100), page: int = 1,
-                     page_size: int = Query(24, le=60), who: Principal = Depends(require("directory.read"))):
+                     page_size: int = Query(24, le=60), career: str = "", organisation: str = "", domain: str = "", sort: str = "name",
+                     who: Principal = Depends(require("directory.read"))):
     """Browse alumni who chose to be seen by this viewer's role. Search covers name, organisation, domain, city, country,
-    designation and skills. (Richer filters and sorting arrive with Phase 2.)"""
+    designation and skills. Phase 2 adds filters (batch, career = PLACEMENT|HIGHER_STUDIES|ENTREPRENEURSHIP, organisation,
+    domain) and sorting (name, name_desc, year, year_desc)."""
     with db() as c:
-        return visibility.directory(c, who, search, batch, page, page_size)
+        try:
+            return visibility.directory(c, who, search, batch, page, page_size, career=career, organisation=organisation, domain=domain, sort=sort)
+        except filters.FilterError as e:
+            raise HTTPException(422, str(e))
+
+
+@app.get("/api/directory/filters")
+def member_directory_filters(who: Principal = Depends(require("directory.read"))):
+    """Dropdown values for the member directory, built only from profiles this viewer may see."""
+    with db() as c:
+        return visibility.directory_options(c, who)
 
 
 # ================================================================ public alumni portal (token only)

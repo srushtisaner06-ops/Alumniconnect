@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react'
-import { ChevronLeft, ChevronRight, Copy, ExternalLink, Search, Trash2, Undo2, X } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Copy, Download, ExternalLink, Search, Trash2, Undo2, X } from 'lucide-react'
 import { api, can, download } from '../api'
 import { reviewDocument } from './Verification.jsx'
 import { Badge, CAREER, CATEGORIES, CATEGORY_KEYS, CategoryBadges, ErrorBox, PageHeader, Spinner, StatusBadge, fmtDate, useLoad, useToast } from '../ui.jsx'
 
 const TABS = [['all', 'All'], ['PENDING', 'Pending'], ['COMPLETED', 'Completed'], ['OVERDUE', 'Overdue']]
+const SORTS = [['', 'Default (sr. no.)'], ['name', 'Name (A–Z)'], ['name_desc', 'Name (Z–A)'], ['year_desc', 'Newest batch first'], ['year', 'Oldest batch first']]
 
 // What to show in the "organisation" and "detail" columns for the category being viewed.
 const COLS = {
@@ -25,11 +26,27 @@ export default function Alumni() {
   const [search, setSearch] = useState('')
   const [status, setStatus] = useState('all')
   const [category, setCategory] = useState('all')
+  const [batch, setBatch] = useState('')
+  const [domain, setDomain] = useState('')
+  const [sort, setSort] = useState('')
+  const [org, setOrg] = useState('')                 // typed text, applied with the Search button
+  const [organisation, setOrganisation] = useState('')
   const [page, setPage] = useState(1)
   const [openId, setOpenId] = useState(null)
-  function submitSearch(e) { e.preventDefault(); setSearch(q.trim()); setPage(1) }
-  function clearSearch() { setQ(''); setSearch(''); setPage(1) }
-  const list = useLoad(() => api(`/alumni?search=${encodeURIComponent(search)}&status=${status}&category=${category}&page=${page}&page_size=25`), [search, status, category, page])
+  function submitSearch(e) { e.preventDefault(); setSearch(q.trim()); setOrganisation(org.trim()); setPage(1) }
+  function clearSearch() { setQ(''); setSearch(''); setOrg(''); setOrganisation(''); setBatch(''); setDomain(''); setPage(1) }
+  // The list and the CSV export are built from the same filter string, so the file always matches what is on screen.
+  const filterQuery = () => {
+    const p = new URLSearchParams({ search, status, category })
+    if (batch) p.set('batch', batch)
+    if (organisation) p.set('organisation', organisation)
+    if (domain) p.set('domain', domain)
+    if (sort) p.set('sort', sort)
+    return p.toString()
+  }
+  const list = useLoad(() => api(`/alumni?${filterQuery()}&page=${page}&page_size=25`), [search, status, category, batch, organisation, domain, sort, page])
+  const options = useLoad(() => api('/alumni/filters'), [])
+  const exportCsv = () => download(`/alumni/export?${filterQuery()}`, 'alumni_directory.csv').catch((e) => toast(e.message, 'err'))
   const undo = useLoad(() => api('/undo'), [])
   const reloadAll = () => { list.reload(); undo.reload() }
   const pages = list.data ? Math.max(1, Math.ceil(list.data.total / list.data.page_size)) : 1
@@ -50,8 +67,21 @@ export default function Alumni() {
             <input aria-label="Search alumni" className="input pl-9" placeholder="Enter name, PRN, email, employer, university or company" value={q} onChange={(e) => setQ(e.target.value)} />
           </div>
           <button className="btn-primary sm:min-w-28" type="submit"><Search className="h-4 w-4" />Search</button>
-          {(q || search) && <button className="btn-ghost" type="button" onClick={clearSearch}>Clear</button>}
+          {(q || search || org || organisation || batch || domain) && <button className="btn-ghost" type="button" onClick={clearSearch}>Clear</button>}
         </form>
+        <div className="mt-4 grid gap-x-6 gap-y-4 border-t border-sky-200 pt-4 sm:grid-cols-2 lg:grid-cols-4">
+          <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Batch
+            <select className="input mt-1 font-normal normal-case tracking-normal" value={batch} onChange={(e) => { setBatch(e.target.value); setPage(1) }}>
+              <option value="">All batches</option>{(options.data?.batches || []).map((y) => <option key={y} value={y}>{y}</option>)}</select></label>
+          <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Company / institution
+            <input className="input mt-1 font-normal normal-case tracking-normal" placeholder="Type, then press Search" value={org} onChange={(e) => setOrg(e.target.value)} /></label>
+          <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Professional domain
+            <select className="input mt-1 font-normal normal-case tracking-normal" value={domain} onChange={(e) => { setDomain(e.target.value); setPage(1) }} disabled={!(options.data?.domains || []).length}>
+              <option value="">{(options.data?.domains || []).length ? 'All domains' : 'No domains recorded yet'}</option>{(options.data?.domains || []).map((d) => <option key={d} value={d}>{d}</option>)}</select></label>
+          <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Sort by
+            <select className="input mt-1 font-normal normal-case tracking-normal" value={sort} onChange={(e) => { setSort(e.target.value); setPage(1) }}>
+              {SORTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></label>
+        </div>
         <div className="mt-4 flex flex-col gap-3 border-t border-sky-200 pt-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Filter by category</div>
           <div className="flex flex-wrap gap-1.5" role="tablist" aria-label="Filter alumni by category">
@@ -72,7 +102,8 @@ export default function Alumni() {
       </div>
       <ErrorBox error={list.error} retry={list.reload} />
       <div className="card">
-        <div className="flex items-center justify-between border-b border-sky-200 px-4 py-3 sm:px-5"><h2 className="section-title">Alumni records</h2><span className="text-xs text-slate-500">{list.data ? `${list.data.total} total` : 'Loading records'}</span></div>
+        <div className="flex items-center justify-between border-b border-sky-200 px-4 py-3 sm:px-5"><h2 className="section-title">Alumni records</h2><span className="flex items-center gap-3 text-xs text-slate-500">{list.data ? `${list.data.total} total` : 'Loading records'}
+          {can('export.run') && <button className="btn-ghost" onClick={exportCsv} disabled={!list.data?.total} title="Download exactly these filtered results as CSV"><Download className="h-4 w-4" />Export CSV</button>}</span></div>
         <div className="overflow-x-auto">
         <table className="w-full text-left text-sm">
           <thead className="border-b border-slate-200 bg-slate-50 text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500">

@@ -67,6 +67,7 @@ def overdue_cutoff(c):
 
 
 CATEGORY_TABLES = {"PLACEMENT": "offers", "HIGHER_STUDIES": "higher_studies", "ENTREPRENEURSHIP": "ventures"}
+CATEGORY_LABELS = {"PLACEMENT": "Placement", "HIGHER_STUDIES": "Higher studies", "ENTREPRENEURSHIP": "Entrepreneurship"}
 
 
 def alumnus_dict(c, row, with_offers=True):
@@ -601,5 +602,13 @@ def analytics(c):
     progression = {"final_year_students": fs_all, "placed": placed, "higher_studies": hs_students,
                    "entrepreneurship": ent_students, "total": total_unique,
                    "index": round(100 * total_unique / fs_all, 2) if fs_all else None}
+    # ---- Phase 2: alumni by professional domain (only people who have one on their profile; names are grouped
+    # case-insensitively, so "IT" and "it " count together). The rest are reported as `without_domain`, not guessed.
+    dom_rows = [dict(r) for r in c.execute(
+        """SELECT MIN(TRIM(p.professional_domain)) domain, COUNT(*) alumni FROM profiles p
+           WHERE TRIM(COALESCE(p.professional_domain,''))<>'' GROUP BY LOWER(TRIM(p.professional_domain))
+           ORDER BY alumni DESC, domain COLLATE NOCASE LIMIT 8""")]
+    with_domain = c.execute("SELECT COUNT(*) n FROM profiles WHERE TRIM(COALESCE(professional_domain,''))<>''").fetchone()["n"]
+    by_domain = {"items": dom_rows, "with_domain": with_domain, "without_domain": max(0, s["total"] - with_domain)}
     return {"summary": s, "by_batch": by_batch, "career": career, "placement": placement,
-            "higher_studies": higher, "entrepreneurship": entrepreneurship, "progression": progression}
+            "higher_studies": higher, "entrepreneurship": entrepreneurship, "progression": progression, "by_domain": by_domain}
