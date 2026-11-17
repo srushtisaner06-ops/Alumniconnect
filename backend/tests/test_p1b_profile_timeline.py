@@ -368,4 +368,4 @@ def test_migration_backfills_timeline_for_existing_people_and_is_repeatable(tmp_
         careers.baseline(c, 1)
         careers.baseline(c, 2)                                          # running it again adds nothing
         assert len(careers.list_events(c, 1)) == 2 and len(careers.list_events(c, 2)) == 2
-        assert [r["version"] for r in c.execute("SELECT version FROM schema_migrations")] == [1, 2, 3]
+        assert [r["version"] for r in c.execute("SELECT version FROM schema_migrations")][:3] == [1, 2, 3]

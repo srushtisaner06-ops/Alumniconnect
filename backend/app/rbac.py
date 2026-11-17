@@ -31,16 +31,20 @@ PERMISSIONS = {
     "profile.own.read": "View my own profile and privacy setting",
     "profile.own.write": "Change my own privacy setting",
     "directory.read": "Browse profiles that are visible to my role",
+    "connection.use": "Send, answer and manage my own alumni connection requests",
+    "opportunity.read": "View the opportunities board",
+    "opportunity.post": "Post opportunities, and edit or delete my own",
+    "opportunity.manage": "Edit or delete any opportunity",
 }
 
 _STAFF = {"alumni.read", "alumni.write", "alumni.link.manage", "import.run", "export.run", "campaign.manage",
-          "report.view", "directory.read", "verification.review"}
+          "report.view", "directory.read", "verification.review", "opportunity.read"}
 
 ROLE_PERMISSIONS = {
     ADMIN: set(PERMISSIONS),
     FACULTY: set(_STAFF),
-    ALUMNI: {"profile.own.read", "profile.own.write", "directory.read"},
-    STUDENT: {"directory.read"},
+    ALUMNI: {"profile.own.read", "profile.own.write", "directory.read", "connection.use", "opportunity.read", "opportunity.post"},
+    STUDENT: {"directory.read", "opportunity.read"},
 }
 
 STAFF_ROLES = frozenset({ADMIN, FACULTY})

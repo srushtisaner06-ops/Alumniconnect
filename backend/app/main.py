@@ -15,7 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 
-from . import accounts, audit, careers, config, documents, engine, filters, importer, income, notifier, profiles, rbac, ratelimit, services, storage, visibility
+from . import accounts, audit, careers, config, connections, documents, engine, filters, importer, income, notifier, opportunities, profiles, rbac, ratelimit, services, storage, visibility
 from .db import db, init
 from .security import Principal, current_principal, optional_principal, require
 
@@ -1090,6 +1090,131 @@ def member_directory_filters(who: Principal = Depends(require("directory.read"))
     """Dropdown values for the member directory, built only from profiles this viewer may see."""
     with db() as c:
         return visibility.directory_options(c, who)
+
+
+# ================================================================ Phase 3: alumni connections
+class ConnectionIn(BaseModel):
+    recipient_id: int
+    message: Optional[str] = Field(None, max_length=connections.MESSAGE_MAX * 2)    # trimmed and length-checked in connections.py
+
+
+def _connection_error(e: connections.ConnectionRefused):
+    return HTTPException(e.status, e.message)
+
+
+@app.get("/api/connections")
+def my_connections(who: Principal = Depends(require("connection.use"))):
+    """My received requests, sent requests and accepted connections. Contact details are never included."""
+    aid = _own_alumni_id(who)
+    with db() as c:
+        return {**connections.overview(c, aid, who), "me": aid}          # `me` lets the Directory hide the button on your own card
+
+
+@app.post("/api/connections")
+def send_connection(body: ConnectionIn, who: Principal = Depends(require("connection.use"))):
+    aid = _own_alumni_id(who)
+    with db() as c:
+        try:
+            cid = connections.send(c, aid, body.recipient_id, body.message, who)
+        except connections.ConnectionRefused as e:
+            raise _connection_error(e)
+        audit.record(c, "connection.request", who, entity_type="connection", entity_id=cid, detail={"to_alumni_id": body.recipient_id})
+    return {"id": cid, "status": connections.PENDING}
+
+
+def _answer(cid, who, accept):
+    aid = _own_alumni_id(who)
+    with db() as c:
+        try:
+            other = connections.respond(c, cid, aid, accept)
+        except connections.ConnectionRefused as e:
+            raise _connection_error(e)
+        audit.record(c, "connection.accept" if accept else "connection.reject", who, entity_type="connection", entity_id=cid,
+                     detail={"requester_alumni_id": other})
+    return {"id": cid, "status": connections.ACCEPTED if accept else connections.REJECTED}
+
+
+@app.post("/api/connections/{cid}/accept")
+def accept_connection(cid: int, who: Principal = Depends(require("connection.use"))):
+    return _answer(cid, who, True)
+
+
+@app.post("/api/connections/{cid}/reject")
+def reject_connection(cid: int, who: Principal = Depends(require("connection.use"))):
+    return _answer(cid, who, False)
+
+
+@app.delete("/api/connections/{cid}")
+def remove_connection(cid: int, who: Principal = Depends(require("connection.use"))):
+    """Withdraw a request I sent, or end a connection (either person can)."""
+    aid = _own_alumni_id(who)
+    with db() as c:
+        try:
+            other, was = connections.remove(c, cid, aid)
+        except connections.ConnectionRefused as e:
+            raise _connection_error(e)
+        audit.record(c, "connection.withdraw" if was == connections.PENDING else "connection.remove", who,
+                     entity_type="connection", entity_id=cid, detail={"other_alumni_id": other})
+    return {"id": cid, "status": connections.CANCELLED}
+
+
+# ================================================================ Phase 4: opportunities board
+class OpportunityIn(BaseModel):
+    category: str = Field(max_length=20)
+    title: str = Field(max_length=400)
+    company: str = Field(max_length=400)
+    description: str = Field(max_length=8000)
+    apply_contact: str = Field(max_length=400)
+    closing_date: str = Field(max_length=20)
+
+
+def _opp_error(e: opportunities.OpportunityError):
+    return HTTPException(e.status, e.message)
+
+
+@app.get("/api/opportunities")
+def list_opportunities(category: str = "all", status: str = "open", search: str = "", mine: bool = False, page: int = 1,
+                       page_size: int = Query(20, le=50), who: Principal = Depends(require("opportunity.read"))):
+    """The board. Closed posts (closing date passed) are hidden unless status=closed or status=all."""
+    with db() as c:
+        try:
+            return opportunities.listing(c, who, category, status, search, mine, page, page_size)
+        except opportunities.OpportunityError as e:
+            raise _opp_error(e)
+
+
+@app.post("/api/opportunities")
+def create_opportunity(body: OpportunityIn, who: Principal = Depends(require("opportunity.post"))):
+    with db() as c:
+        try:
+            oid, data = opportunities.create(c, who, body.model_dump())
+        except opportunities.OpportunityError as e:
+            raise _opp_error(e)
+        audit.record(c, "opportunity.create", who, entity_type="opportunity", entity_id=oid, detail={"title": data["title"], "category": data["category"]})
+    return {"id": oid}
+
+
+@app.put("/api/opportunities/{oid}")
+def update_opportunity(oid: int, body: OpportunityIn, who: Principal = Depends(require("opportunity.read"))):
+    with db() as c:
+        try:
+            data, before = opportunities.update(c, who, oid, body.model_dump())
+        except opportunities.OpportunityError as e:
+            raise _opp_error(e)
+        audit.record(c, "opportunity.update", who, entity_type="opportunity", entity_id=oid, detail={"title": data["title"], "category": data["category"]})
+    return {"id": oid}
+
+
+@app.delete("/api/opportunities/{oid}")
+def delete_opportunity(oid: int, who: Principal = Depends(require("opportunity.read"))):
+    with db() as c:
+        try:
+            row = opportunities.delete(c, who, oid)
+        except opportunities.OpportunityError as e:
+            raise _opp_error(e)
+        audit.record(c, "opportunity.delete", who, entity_type="opportunity", entity_id=oid,
+                     detail={"title": row["title"], "by_owner": row["posted_by_user_id"] == who.user_id})
+    return {"id": oid, "deleted": True}
 
 
 # ================================================================ public alumni portal (token only)

@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useEffect, useState } from 'react'
 import { Navigate, NavLink, Outlet, Route, Routes, useNavigate } from 'react-router-dom'
 import { GraduationCap, LogOut } from 'lucide-react'
 import { api, can, clearSession, getToken, role } from './api'
@@ -16,6 +16,8 @@ import AuditLog from './pages/AuditLog.jsx'
 import Verification from './pages/Verification.jsx'
 import MyProfile from './pages/MyProfile.jsx'
 import Directory from './pages/Directory.jsx'
+import Connections from './pages/Connections.jsx'
+import Opportunities from './pages/Opportunities.jsx'
 import Account from './pages/Account.jsx'
 import { ForgotPassword, ResetPassword } from './pages/PasswordReset.jsx'
 
@@ -31,6 +33,8 @@ const nav = [
   { to: '/dashboard/audit', label: 'Audit log', perm: 'audit.view' },
   { to: '/dashboard/profile', label: 'My profile', perm: 'profile.own.read', hideFor: ['ADMIN', 'FACULTY'] },   // needs an alumni record, so alumni only (admins hold every permission but have no record)
   { to: '/dashboard/network', label: 'Alumni network', perm: 'directory.read', hideFor: ['ADMIN', 'FACULTY'] },   // staff already have the full directory
+  { to: '/dashboard/opportunities', label: 'Opportunities', perm: 'opportunity.read' },                          // everyone signed in can read; posting needs opportunity.post
+  { to: '/dashboard/connections', label: 'Connections', perm: 'connection.use', hideFor: ['ADMIN', 'FACULTY'], badge: true },   // alumni only: connecting needs an alumni record
   { to: '/dashboard/account', label: 'Account', perm: null },                                             // everyone: password, sessions
 ]
 const isStaff = () => can('alumni.read')
@@ -39,8 +43,22 @@ const visible = (n) => (!n.perm || can(n.perm)) && !(n.hideFor || []).includes(r
 // People without staff access land on their own page instead of a dashboard they cannot use.
 const Home = () => (isStaff() ? <Dashboard /> : <Navigate to={can('profile.own.read') ? '/dashboard/profile' : '/dashboard/network'} replace />)
 
+// Number of connection requests waiting for my answer (alumni only), refreshed after any action on the Connections page.
+function useWaitingRequests() {
+  const [n, setN] = useState(0)
+  useEffect(() => {
+    if (!getToken() || !can('connection.use') || role() !== 'ALUMNI') return undefined
+    const load = () => api('/connections').then((r) => setN(r.counts.received)).catch(() => {})
+    load()
+    window.addEventListener('connections-changed', load)
+    return () => window.removeEventListener('connections-changed', load)
+  }, [])
+  return n
+}
+
 function Shell() {
   const navigate = useNavigate()
+  const waiting = useWaitingRequests()
   if (!getToken()) return <Navigate to="/login" replace />
   const link = ({ isActive }) => `relative whitespace-nowrap py-2 text-sm font-medium transition after:absolute after:inset-x-0 after:-bottom-0.5 after:h-0.5 after:rounded-full after:transition ${isActive ? 'text-slate-900 after:bg-gradient-to-r after:from-indigo-400 after:to-blue-700' : 'text-slate-500 after:bg-transparent hover:text-slate-900 hover:after:bg-sky-300'}`
   const signOut = async () => { try { await api('/auth/logout', { method: 'POST' }) } catch { /* already gone */ } clearSession(); navigate('/login') }
@@ -55,7 +73,7 @@ function Shell() {
             <div className="font-display text-xl font-semibold tracking-tight text-slate-900">Alumni<span className="text-indigo-600">Connect</span></div>
           </div>
           <nav className="order-3 flex w-full gap-7 overflow-x-auto pb-1 md:order-none md:w-auto md:flex-1 md:justify-center md:overflow-visible md:pb-0" aria-label="Main navigation">
-            {nav.filter(visible).map(({ to, label, end }) => <NavLink key={to} to={to} end={end} className={link}>{label}</NavLink>)}
+            {nav.filter(visible).map(({ to, label, end, badge }) => <NavLink key={to} to={to} end={end} className={link}>{label}{badge && waiting > 0 && <span className="ml-1.5 rounded-full bg-indigo-600 px-1.5 py-0.5 text-[10px] font-semibold text-white" aria-label={`${waiting} waiting`}>{waiting}</span>}</NavLink>)}
           </nav>
           <button className="ml-auto inline-flex items-center gap-2 text-sm font-medium text-slate-500 transition hover:text-slate-900 md:ml-0" onClick={signOut}><LogOut className="h-4 w-4" />Sign out</button>
         </div>
@@ -86,6 +104,8 @@ export default function App() {
           <Route index element={<Home />} />
           <Route path="profile" element={<MyProfile />} />
           <Route path="network" element={<Directory />} />
+          <Route path="connections" element={<Connections />} />
+          <Route path="opportunities" element={<Opportunities />} />
           <Route path="account" element={<Account />} />
           <Route path="verification" element={<Verification />} />
           <Route path="users" element={<Users />} />

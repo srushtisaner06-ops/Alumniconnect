@@ -196,3 +196,52 @@ def phase1b(c):
             continue
         careers.record_submission(c, r["id"], r["career_status"], details, source="MIGRATION")
         profiles.fill_from_submission(c, r["id"], r["career_status"], details)
+
+
+# ------------------------------------------------------------------ 4: Phase 3 alumni connections
+@migration(4, "phase3_connections")
+def phase3_connections(c):
+    # One row per request. `pair_key` ("low:high" of the two alumni ids, built in Python) lets one partial unique index
+    # guarantee there is never more than one live (PENDING or ACCEPTED) relationship between two people, whichever of them
+    # asked first. REJECTED and CANCELLED rows stay as history; the rejection date drives the re-request cool-down.
+    c.executescript("""
+    CREATE TABLE IF NOT EXISTS connections(
+      id INTEGER PRIMARY KEY,
+      requester_id INTEGER NOT NULL REFERENCES alumni(id) ON DELETE CASCADE,
+      recipient_id INTEGER NOT NULL REFERENCES alumni(id) ON DELETE CASCADE,
+      pair_key TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING','ACCEPTED','REJECTED','CANCELLED')),
+      message TEXT,
+      created_at TEXT NOT NULL,
+      responded_at TEXT,
+      CHECK (requester_id <> recipient_id));
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_connections_live_pair ON connections(pair_key) WHERE status IN ('PENDING','ACCEPTED');
+    CREATE INDEX IF NOT EXISTS idx_connections_requester ON connections(requester_id, status);
+    CREATE INDEX IF NOT EXISTS idx_connections_recipient ON connections(recipient_id, status);
+    """)
+
+
+# ------------------------------------------------------------------ 5: Phase 4 opportunities board
+@migration(5, "phase4_opportunities")
+def phase4_opportunities(c):
+    # `posted_by_name` is a snapshot taken when the post is made, so the board does not depend on joins to show who posted.
+    # Posts by an alumnus are removed with their record (erasure); posts by a user account survive that account's removal.
+    # closing_date is a plain YYYY-MM-DD calendar date, so "closed" is just a text comparison with today's date.
+    c.executescript("""
+    CREATE TABLE IF NOT EXISTS opportunities(
+      id INTEGER PRIMARY KEY,
+      category TEXT NOT NULL CHECK (category IN ('JOB','INTERNSHIP','REFERRAL')),
+      title TEXT NOT NULL,
+      company TEXT NOT NULL,
+      description TEXT NOT NULL,
+      apply_contact TEXT NOT NULL,
+      closing_date TEXT NOT NULL,
+      posted_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      posted_by_alumni_id INTEGER REFERENCES alumni(id) ON DELETE CASCADE,
+      posted_by_name TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL);
+    CREATE INDEX IF NOT EXISTS idx_opportunities_closing ON opportunities(closing_date);
+    CREATE INDEX IF NOT EXISTS idx_opportunities_category ON opportunities(category, closing_date);
+    CREATE INDEX IF NOT EXISTS idx_opportunities_poster ON opportunities(posted_by_user_id);
+    """)
