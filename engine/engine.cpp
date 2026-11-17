@@ -1,7 +1,7 @@
 // AlumniConnect core engine.
 // Reads ONE JSON request from stdin, writes ONE JSON response to stdout.
-// Data structures: array, merge sort, binary search, doubly linked list,
-// circular queue, binary-heap priority queue, stack.
+// Data structures: dynamic array, insertion sort, binary search, doubly linked list,
+// array-based priority queue, circular queue, stack.
 #include <iostream>
 #include <sstream>
 #include <string>
@@ -64,27 +64,24 @@ vector<Rec> load(const J& req) {
 }
 string ids(const vector<long long>& v) { string r = "["; for (size_t i = 0; i < v.size(); i++) { if (i) r += ","; r += to_string(v[i]); } return r + "]"; }
 
-// ---------------- sorting: stable merge sort with insertion sort for small runs ----------------
-template <class Less> void msort(vector<Rec>& a, int lo, int hi, Less lt, vector<Rec>& tmp) {
-    if (hi - lo <= 12) {
-        for (int i = lo + 1; i < hi; i++) { Rec k = a[i]; int j = i - 1; while (j >= lo && lt(k, a[j])) { a[j + 1] = a[j]; j--; } a[j + 1] = k; }
-        return;
-    }
-    int mid = (lo + hi) / 2;
-    msort(a, lo, mid, lt, tmp); msort(a, mid, hi, lt, tmp);
-    int i = lo, j = mid, k = lo;
-    while (i < mid && j < hi) tmp[k++] = lt(a[j], a[i]) ? a[j++] : a[i++];
-    while (i < mid) tmp[k++] = a[i++];
-    while (j < hi) tmp[k++] = a[j++];
-    for (k = lo; k < hi; k++) a[k] = tmp[k];
-}
+// ---------------- insertion sort ----------------
 int statusRank(const string& s) { return s == "PENDING" ? 0 : s == "COMPLETED" ? 2 : 1; }
 void sortRecs(vector<Rec>& a, const string& key) {
-    vector<Rec> tmp(a.size());
-    if (key == "graduation_year") msort(a, 0, a.size(), [](const Rec& x, const Rec& y) { return x.year < y.year; }, tmp);
-    else if (key == "status") msort(a, 0, a.size(), [](const Rec& x, const Rec& y) { return statusRank(x.status) < statusRank(y.status); }, tmp);
-    else if (key == "priority") msort(a, 0, a.size(), [](const Rec& x, const Rec& y) { return x.priority > y.priority; }, tmp);
-    else msort(a, 0, a.size(), [](const Rec& x, const Rec& y) { return x.prn < y.prn; }, tmp);
+    auto before = [&](const Rec& x, const Rec& y) {
+        if (key == "graduation_year") return x.year < y.year;
+        if (key == "status") return statusRank(x.status) < statusRank(y.status);
+        if (key == "priority") return x.priority > y.priority;
+        return x.prn < y.prn;
+    };
+    for (size_t i = 1; i < a.size(); i++) {
+        Rec current = a[i];
+        int j = (int)i - 1;
+        while (j >= 0 && before(current, a[j])) {
+            a[j + 1] = a[j];
+            j--;
+        }
+        a[j + 1] = current;
+    }
 }
 
 // ---------------- doubly linked list ----------------
@@ -103,21 +100,24 @@ struct DList {
     ~DList() { while (head) { Node* n = head->next; delete head; head = n; } }
 };
 
-// ---------------- binary-heap priority queue (max-heap) ----------------
+// ---------------- array-based priority queue ----------------
+// Highest priority is removed first. This uses a simple array-based
+// implementation of the Priority Queue ADT (not a binary heap).
 struct PQ {
-    vector<Rec> h;
-    static bool before(const Rec& a, const Rec& b) { return a.priority > b.priority || (a.priority == b.priority && a.id < b.id); }
-    void push(const Rec& r) { h.push_back(r); size_t i = h.size() - 1; while (i && before(h[i], h[(i - 1) / 2])) { swap(h[i], h[(i - 1) / 2]); i = (i - 1) / 2; } }
+    vector<Rec> items;
+    static bool before(const Rec& a, const Rec& b) {
+        return a.priority > b.priority || (a.priority == b.priority && a.id < b.id);
+    }
+    void push(const Rec& r) { items.push_back(r); }
     Rec pop() {
-        Rec top = h[0]; h[0] = h.back(); h.pop_back(); size_t i = 0;
-        while (true) { size_t l = 2 * i + 1, r = l + 1, m = i;
-            if (l < h.size() && before(h[l], h[m])) m = l;
-            if (r < h.size() && before(h[r], h[m])) m = r;
-            if (m == i) break;
-            swap(h[i], h[m]); i = m; }
+        size_t best = 0;
+        for (size_t i = 1; i < items.size(); i++)
+            if (before(items[i], items[best])) best = i;
+        Rec top = items[best];
+        items.erase(items.begin() + best);
         return top;
     }
-    bool empty() const { return h.empty(); }
+    bool empty() const { return items.empty(); }
 };
 
 // ---------------- circular queue ----------------
