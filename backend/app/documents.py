@@ -19,7 +19,7 @@ CATEGORIES = ("EMPLOYMENT", "HIGHER_STUDIES", "ENTREPRENEURSHIP")
 PENDING, APPROVED, REJECTED = "PENDING", "APPROVED", "REJECTED"
 
 PROOF_TYPES = {
-    "EMPLOYMENT": [("JOINING_MAIL", "Joining or offer-confirmation email (PDF or screenshot)"),
+    "EMPLOYMENT": [("JOINING_MAIL", "Joining or offer-confirmation email"),
                    ("OFFICE_ID_CARD", "Company ID card"),
                    ("APPOINTMENT_LETTER", "Appointment letter"),
                    ("OTHER", "Other proof of employment")],
@@ -81,8 +81,8 @@ def status_of(c, alumni_id):
 
 
 # ---------------------------------------------------------------- upload
-def add_proof(c, store, alumni_id, category, doc_type, filename, data, declared_type=None):
-    """Validate and store a new proof. Returns (doc_id, keys_to_delete_after_commit). Raises DocumentError / StorageError."""
+def add_proof(c, store, alumni_id, category, doc_type, filename, data, declared_type=None, stream=None):
+    """Validate and store a new proof, from `data` (bytes) or `stream` (a file-like object, copied in chunks). Returns (doc_id, keys_to_delete_after_commit). Raises DocumentError / StorageError."""
     if category not in PROOF_TYPES:
         raise DocumentError("Choose Placement, Higher Studies or Entrepreneurship first")
     if doc_type not in {code for code, _ in PROOF_TYPES[category]}:
@@ -92,7 +92,8 @@ def add_proof(c, store, alumni_id, category, doc_type, filename, data, declared_
                       (alumni_id, APPROVED)).fetchall()
     if live - len(stale) >= config.MAX_PROOFS_PER_ALUMNI:
         raise DocumentError("Too many documents are already on file. Please contact the department.", 409)
-    saved = store.save_upload(filename, data, declared_type)             # raises StorageError on a bad file
+    saved = (store.save_stream(filename, stream, declared_type) if stream is not None
+             else store.save_upload(filename, data, declared_type))      # raises StorageError on a bad file
     now = _now()
     for old in stale:                                                    # the new upload replaces anything not yet accepted
         c.execute("UPDATE verification_documents SET superseded_at=? WHERE id=?", (now, old["id"]))

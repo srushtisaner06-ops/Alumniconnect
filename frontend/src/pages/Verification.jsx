@@ -5,7 +5,7 @@ import { Badge, ErrorBox, PageHeader, Spinner, fmtDate, useLoad, useToast } from
 
 const TONE = { PENDING: 'amber', APPROVED: 'green', REJECTED: 'red' }
 const CAT = { EMPLOYMENT: 'Placement', HIGHER_STUDIES: 'Higher studies', ENTREPRENEURSHIP: 'Entrepreneurship' }
-const kb = (n) => (n > 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`)
+const kb = (n) => (n >= 1073741824 ? `${(n / 1073741824).toFixed(2)} GB` : n > 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`)
 
 // Shared by this page and the alumni drawer, so approving works the same way in both places.
 export async function reviewDocument(doc, decision, toast, done) {

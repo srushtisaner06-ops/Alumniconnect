@@ -57,7 +57,7 @@ def test_form_tells_the_page_what_to_ask(client, person):
     f = client.get(f"/api/public/form?token={tok}").json()
     assert set(f["income_bands"]) == {"EMPLOYMENT", "HIGHER_STUDIES", "ENTREPRENEURSHIP"}
     assert [t["code"] for t in f["proof_types"]["EMPLOYMENT"]][:2] == ["JOINING_MAIL", "OFFICE_ID_CARD"]
-    assert f["proof"] is None and f["max_upload_mb"] == 5 and "key" not in json.dumps(f).lower().replace("keyword", "")
+    assert f["proof"] is None and f["max_upload_mb"] == config.MAX_DOCUMENT_BYTES // (1024 * 1024) and "key" not in json.dumps(f).lower().replace("keyword", "")
 
 
 def test_every_career_type_has_a_valid_way_to_say_nothing_yet():

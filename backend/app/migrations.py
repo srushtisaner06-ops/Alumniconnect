@@ -245,3 +245,31 @@ def phase4_opportunities(c):
     CREATE INDEX IF NOT EXISTS idx_opportunities_category ON opportunities(category, closing_date);
     CREATE INDEX IF NOT EXISTS idx_opportunities_poster ON opportunities(posted_by_user_id);
     """)
+
+
+# ------------------------------------------------------------------ 6: Phase 5 events and registration
+@migration(6, "phase5_events")
+def phase5_events(c):
+    # event_date is YYYY-MM-DD and event_time is HH:MM (24 h, India time), so "has it started" is a plain text comparison.
+    # A registration is just a row: cancelling deletes it (the audit log keeps the history). One row per person per event.
+    c.executescript("""
+    CREATE TABLE IF NOT EXISTS events(
+      id INTEGER PRIMARY KEY,
+      name TEXT NOT NULL,
+      description TEXT NOT NULL,
+      event_date TEXT NOT NULL,
+      event_time TEXT NOT NULL,
+      venue TEXT NOT NULL,
+      registration_link TEXT,
+      created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL);
+    CREATE INDEX IF NOT EXISTS idx_events_when ON events(event_date, event_time);
+    CREATE TABLE IF NOT EXISTS event_registrations(
+      id INTEGER PRIMARY KEY,
+      event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      registered_at TEXT NOT NULL,
+      UNIQUE(event_id, user_id));
+    CREATE INDEX IF NOT EXISTS idx_event_registrations_user ON event_registrations(user_id);
+    """)

@@ -9,6 +9,7 @@ const OPTIONS = [
   { v: 'HIGHER_STUDIES', label: 'Higher studies', icon: GraduationCap },
   { v: 'ENTREPRENEURSHIP', label: 'Entrepreneurship', icon: Rocket },
 ]
+const sizeMB = (mb) => (mb >= 1024 ? `${+(mb / 1024).toFixed(1)} GB` : `${mb} MB`)
 const FIELDS = {
   EMPLOYMENT: [['company', 'Company name', true], ['designation', 'Designation', true], ['industry', 'Industry', true], ['notes', 'Anything else you would like to share (optional)', false, 'textarea']],
   HIGHER_STUDIES: [['university', 'University', true], ['country', 'Country', true], ['degree', 'Degree (e.g. MS, MBA)', true], ['specialization', 'Specialization', true]],
@@ -29,10 +30,12 @@ export default function UpdateForm() {
   const [proofType, setProofType] = useState('')
   const [file, setFile] = useState(null)
   const [consent, setConsent] = useState(false)
+  const [contact, setContact] = useState({ email: '', phone: '' })     // confirmed or corrected here; pre-filled from the department's record
 
   useEffect(() => {
     api(`/public/form?token=${encodeURIComponent(token)}`, { auth: false }).then((r) => {
       setInfo(r)
+      if (r.contact) setContact({ email: r.contact.email || '', phone: r.contact.phone || '' })
       if (r.income_band) setIncome(r.income_band)
       if (r.career_status) { setKind(r.career_status); setD(r.details || {}) }
       else if (r.prefill) {   // pre-fill from the placement / higher-studies / entrepreneurship record the department holds
@@ -51,7 +54,7 @@ export default function UpdateForm() {
         const up = await api('/public/proof', { method: 'POST', auth: false, form: f })
         setInfo((i) => ({ ...i, proof: up.proof })); setFile(null)
       }
-      await api('/public/submit', { method: 'POST', auth: false, body: { token, career_status: kind, details: d, income_band: bandOk ? income : null, consent } })
+      await api('/public/submit', { method: 'POST', auth: false, body: { token, career_status: kind, details: d, income_band: bandOk ? income : null, consent, email: contact.email, phone: contact.phone } })
       nav('/submission-success')
     }
     catch (x) { setErr(x); window.scrollTo(0, 0) } finally { setBusy(false) }
@@ -62,7 +65,7 @@ export default function UpdateForm() {
   const proof = info?.proof
   const hasProof = !!proof && proof.category === kind && proof.status !== 'REJECTED'
   const needFile = !!info?.requirements?.proof && !hasProof
-  const tooBig = !!file && file.size > (info?.max_upload_mb || 5) * 1024 * 1024
+  const tooBig = !!file && file.size > (info?.max_upload_mb || 1024) * 1024 * 1024
   const pickFile = (f) => { setFile(f || null) }
 
   if (!info && !err) return <Spinner />
@@ -86,6 +89,13 @@ export default function UpdateForm() {
         {info.prefill && !info.career_status && <p className="mb-6 border-l-4 border-indigo-400 py-1 pl-3 text-sm text-indigo-800">We pre-filled some details from your {info.prefill.source} record. Please confirm or correct them.</p>}
         <form onSubmit={submit} className="space-y-8">
           <ErrorBox error={err} />
+          <fieldset className="space-y-5"><legend className="section-title mb-1">Your contact details</legend>
+            <p className="text-sm leading-6 text-slate-500">The department uses these to reach you. Please check they are current and correct them if not.</p>
+            <div><label className="label" htmlFor="contact_email">Email address<span className="text-red-600"> *</span></label>
+              <input id="contact_email" type="email" required autoComplete="email" maxLength={200} className="input" value={contact.email} onChange={(e) => setContact({ ...contact, email: e.target.value })} /></div>
+            <div><label className="label" htmlFor="contact_phone">Mobile number<span className="text-red-600"> *</span></label>
+              <input id="contact_phone" type="tel" required autoComplete="tel" inputMode="tel" maxLength={20} placeholder="10-digit number, e.g. 98765 43210" className="input" value={contact.phone} onChange={(e) => setContact({ ...contact, phone: e.target.value })} /></div>
+          </fieldset>
           <fieldset><legend className="section-title mb-5">What are you doing now?</legend>
             <div className="grid grid-cols-3 gap-4">
               {OPTIONS.map(({ v, label, icon: Icon }) => (
@@ -116,7 +126,7 @@ export default function UpdateForm() {
                   <option value="">Select…</option>{info.proof_types[kind].map((o) => <option key={o.code} value={o.code}>{o.label}</option>)}</select></div>
               <div><label className="label" htmlFor="pfile">{hasProof ? 'Replace the file (optional)' : 'Upload the proof'}{needFile && <span className="text-red-600"> *</span>}</label>
                 <input id="pfile" type="file" required={needFile} accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg" className="input" onChange={(e) => pickFile(e.target.files[0])} />
-                <p className={`mt-1 text-xs ${tooBig ? 'text-red-700' : 'text-slate-500'}`}>{tooBig ? `This file is larger than ${info.max_upload_mb} MB.` : `PDF, PNG or JPG, up to ${info.max_upload_mb} MB. Hide any ID, account or Aadhaar number that is not needed.`}</p></div>
+                <p className={`mt-1 text-xs ${tooBig ? 'text-red-700' : 'text-slate-500'}`}>{tooBig ? `This file is larger than ${sizeMB(info.max_upload_mb)}.` : `PDF, PNG or JPG, up to ${sizeMB(info.max_upload_mb)}. Hide any ID, account or Aadhaar number that is not needed.`}</p></div>
               <label className="flex items-start gap-3 text-sm text-slate-700">
                 <input type="checkbox" required={info.requirements.proof || info.requirements.income} className="mt-1 h-4 w-4" checked={consent} onChange={(e) => setConsent(e.target.checked)} />
                 <span>I agree that the college may store this proof and my income range to verify my details and prepare statistics, and I can ask for them to be deleted.</span></label>

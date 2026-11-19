@@ -35,16 +35,19 @@ PERMISSIONS = {
     "opportunity.read": "View the opportunities board",
     "opportunity.post": "Post opportunities, and edit or delete my own",
     "opportunity.manage": "Edit or delete any opportunity",
+    "event.read": "View upcoming events",
+    "event.register": "Register for events and cancel my registration",
+    "event.manage": "Create, edit and delete events, and see who registered",
 }
 
 _STAFF = {"alumni.read", "alumni.write", "alumni.link.manage", "import.run", "export.run", "campaign.manage",
-          "report.view", "directory.read", "verification.review", "opportunity.read"}
+          "report.view", "directory.read", "verification.review", "opportunity.read", "event.read", "event.register"}
 
 ROLE_PERMISSIONS = {
     ADMIN: set(PERMISSIONS),
     FACULTY: set(_STAFF),
-    ALUMNI: {"profile.own.read", "profile.own.write", "directory.read", "connection.use", "opportunity.read", "opportunity.post"},
-    STUDENT: {"directory.read", "opportunity.read"},
+    ALUMNI: {"profile.own.read", "profile.own.write", "directory.read", "connection.use", "opportunity.read", "opportunity.post", "event.read", "event.register"},
+    STUDENT: {"directory.read", "opportunity.read", "event.read", "event.register"},
 }
 
 STAFF_ROLES = frozenset({ADMIN, FACULTY})

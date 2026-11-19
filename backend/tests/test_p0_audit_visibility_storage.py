@@ -163,7 +163,7 @@ def test_oversize_upload_is_rejected():
     # Built inside the test, never as a parameter: pytest copies parameters into an environment variable, and
     # Windows refuses values over 32,767 characters.
     with pytest.raises(storage.StorageError, match="too large"):
-        storage.validate_upload("x.pdf", b"%PDF-" + b"0" * config.MAX_DOCUMENT_BYTES)
+        storage.validate_upload("x.pdf", b"%PDF-" + b"0" * 2000, max_bytes=1000)       # the default limit is 1 GB: too big to build in a test
     storage.validate_upload("x.pdf", b"%PDF-" + b"0" * 100, max_bytes=1000)           # under the limit passes
     with pytest.raises(storage.StorageError, match="too large"):
         storage.validate_upload("x.pdf", b"%PDF-" + b"0" * 100, max_bytes=50)

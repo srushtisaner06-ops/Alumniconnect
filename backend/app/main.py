@@ -12,10 +12,11 @@ from typing import Optional
 import openpyxl
 from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
-from . import accounts, audit, careers, config, connections, documents, engine, filters, importer, income, notifier, opportunities, profiles, rbac, ratelimit, services, storage, visibility
+from . import accounts, audit, careers, config, connections, documents, engine, events, filters, importer, income, notifier, opportunities, profiles, rbac, ratelimit, services, storage, visibility
+from .uploadguard import UploadSizeGuard
 from .db import db, init
 from .security import Principal, current_principal, optional_principal, require
 
@@ -77,6 +78,7 @@ async def lifespan(app):
 
 app = FastAPI(title="AlumniConnect", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=config.CORS_ORIGINS, allow_methods=["*"], allow_headers=["*"])
+app.add_middleware(UploadSizeGuard, paths={"/api/public/proof"}, limit=lambda: config.MAX_DOCUMENT_BYTES)   # 413 before a huge body is read
 
 
 @app.middleware("http")
@@ -824,17 +826,18 @@ def reminders(campaign_id: Optional[int] = None, limit: int = Query(100, le=500)
 
 # ================================================================ proof documents
 @app.post("/api/public/proof", dependencies=[Depends(ratelimit.by_ip("public_write"))])
-async def public_proof(token: str = Form(...), career_status: str = Form(...), doc_type: str = Form(...), file: UploadFile = File(...)):
-    """The alumnus uploads proof through their personal link. Sent before the main submit, so the existing JSON submit is unchanged."""
+def public_proof(token: str = Form(...), career_status: str = Form(...), doc_type: str = Form(...), file: UploadFile = File(...)):
+    """The alumnus uploads proof through their personal link. Sent before the main submit, so the existing JSON submit is unchanged.
+    The file is copied to private storage in chunks (never held in memory) and refused as soon as it passes the size limit."""
     ratelimit.check("public_token", token[:64])
-    data = await file.read(config.MAX_DOCUMENT_BYTES + 1)          # never read more than the limit allows
     try:
         with db() as c:
             r = _by_token(c, token)
-            doc_id, stale = documents.add_proof(c, storage.get_storage(), r["id"], career_status, doc_type, file.filename, data, file.content_type)
-            audit.record(c, "document.upload", None, actor_email="(alumni link)", entity_type="alumni", entity_id=r["id"],
-                         detail={"document_id": doc_id, "category": career_status, "doc_type": doc_type, "bytes": len(data)})
+            doc_id, stale = documents.add_proof(c, storage.get_storage(), r["id"], career_status, doc_type, file.filename, None,
+                                                file.content_type, stream=file.file)
             proof = documents.current(c, r["id"])
+            audit.record(c, "document.upload", None, actor_email="(alumni link)", entity_type="alumni", entity_id=r["id"],
+                         detail={"document_id": doc_id, "category": career_status, "doc_type": doc_type, "bytes": proof["size_bytes"]})
     except (documents.DocumentError, storage.StorageError) as e:
         raise HTTPException(getattr(e, "status", 422), str(e))
     documents.remove_files(stale)                                  # replaced uploads, removed only after the commit
@@ -875,12 +878,12 @@ def download_document(doc_id: int, who: Principal = Depends(current_principal)):
         if not r or not (who.has("verification.review") or (who.alumni_id is not None and who.alumni_id == r["alumni_id"])):
             raise HTTPException(404, "Document not found")
         audit.record(c, "document.download", who, entity_type="alumni", entity_id=r["alumni_id"], detail={"document_id": doc_id})
-    try:
-        data = storage.get_storage().get(r["storage_key"])
-    except storage.StorageError:
+    store = storage.get_storage()
+    if not store.exists(r["storage_key"]):
         raise HTTPException(404, "The stored file is missing")
     safe = re.sub(r"[^A-Za-z0-9._ -]", "_", r["original_name"])[:100] or "document"
-    return Response(data, media_type=r["content_type"], headers={
+    return StreamingResponse(store.iter_chunks(r["storage_key"]), media_type=r["content_type"], headers={       # chunked, so a big file is not loaded into memory
+        "Content-Length": str(r["size_bytes"]),
         "Content-Disposition": f'attachment; filename="{safe}"',
         "X-Content-Type-Options": "nosniff",          # the browser must not guess a different (executable) type
         "Cache-Control": "no-store",
@@ -1217,6 +1220,96 @@ def delete_opportunity(oid: int, who: Principal = Depends(require("opportunity.r
     return {"id": oid, "deleted": True}
 
 
+# ================================================================ Phase 5: events and registration
+class EventIn(BaseModel):
+    name: str = Field(max_length=400)
+    description: str = Field(max_length=8000)
+    event_date: str = Field(max_length=20)
+    event_time: str = Field(max_length=10)
+    venue: str = Field(max_length=400)
+    registration_link: Optional[str] = Field(None, max_length=400)
+
+
+def _event_error(e: events.EventError):
+    return HTTPException(e.status, e.message)
+
+
+@app.get("/api/events")
+def list_events(when: str = "upcoming", search: str = "", page: int = 1, page_size: int = Query(20, le=50),
+                who: Principal = Depends(require("event.read"))):
+    """Upcoming events by default (`when=past` or `all` for others). Only admins see registration counts."""
+    with db() as c:
+        try:
+            return events.listing(c, who, when, search, page, page_size)
+        except events.EventError as e:
+            raise _event_error(e)
+
+
+@app.post("/api/events")
+def create_event(body: EventIn, who: Principal = Depends(require("event.manage"))):
+    with db() as c:
+        try:
+            eid, data = events.create(c, who, body.model_dump())
+        except events.EventError as e:
+            raise _event_error(e)
+        audit.record(c, "event.create", who, entity_type="event", entity_id=eid, detail={"name": data["name"], "date": data["event_date"]})
+    return {"id": eid}
+
+
+@app.put("/api/events/{eid}")
+def update_event(eid: int, body: EventIn, who: Principal = Depends(require("event.manage"))):
+    with db() as c:
+        try:
+            data = events.update(c, eid, body.model_dump())
+        except events.EventError as e:
+            raise _event_error(e)
+        audit.record(c, "event.update", who, entity_type="event", entity_id=eid, detail={"name": data["name"], "date": data["event_date"]})
+    return {"id": eid}
+
+
+@app.delete("/api/events/{eid}")
+def delete_event(eid: int, who: Principal = Depends(require("event.manage"))):
+    with db() as c:
+        try:
+            row, n = events.delete(c, eid)
+        except events.EventError as e:
+            raise _event_error(e)
+        audit.record(c, "event.delete", who, entity_type="event", entity_id=eid, detail={"name": row["name"], "registrations_removed": n})
+    return {"id": eid, "deleted": True}
+
+
+@app.post("/api/events/{eid}/register")
+def register_for_event(eid: int, who: Principal = Depends(require("event.register"))):
+    with db() as c:
+        try:
+            row = events.register(c, who, eid)
+        except events.EventError as e:
+            raise _event_error(e)
+        audit.record(c, "event.register", who, entity_type="event", entity_id=eid, detail={"name": row["name"]})
+    return {"id": eid, "registered": True}
+
+
+@app.delete("/api/events/{eid}/register")
+def cancel_event_registration(eid: int, who: Principal = Depends(require("event.register"))):
+    with db() as c:
+        try:
+            row = events.cancel(c, who, eid)
+        except events.EventError as e:
+            raise _event_error(e)
+        audit.record(c, "event.cancel", who, entity_type="event", entity_id=eid, detail={"name": row["name"]})
+    return {"id": eid, "registered": False}
+
+
+@app.get("/api/events/{eid}/registrations")
+def event_registrations(eid: int, who: Principal = Depends(require("event.manage"))):
+    """Who registered (admin only): name, email, role, batch if an alumnus, and when."""
+    with db() as c:
+        try:
+            return events.participants(c, eid)
+        except events.EventError as e:
+            raise _event_error(e)
+
+
 # ================================================================ public alumni portal (token only)
 LINK_GONE = {"expired": "This link has expired. Please ask the department to send you a new one.",
              "revoked": "This link has been disabled. Please ask the department to send you a new one."}
@@ -1252,6 +1345,7 @@ def public_form(token: str):
         return {"name": r["name"], "graduation_year": r["graduation_year"], "prn": r["prn"], "status": r["status"],
                 "career_status": r["career_status"], "details": json.loads(r["details"]) if r["details"] else None,
                 "prefill": prefill,
+                "contact": {"email": r["email"] or "", "phone": r["phone"] or ""},          # shown on the form so the person can confirm or correct them
                 # Phase 1: proof upload + income range. The server owns the lists, so the form never drifts from the rules.
                 "requirements": {"proof": config.REQUIRE_PROOF, "income": config.REQUIRE_INCOME_RANGE},
                 "income_bands": income.for_form(), "income_band": r["income_band"],
@@ -1265,6 +1359,8 @@ class Submission(BaseModel):
     details: dict
     income_band: Optional[str] = None      # a code from income.BANDS for this career type
     consent: bool = False                  # agrees to proof + income being collected for verification and statistics
+    email: Optional[str] = Field(None, max_length=250)    # contact details, confirmed or corrected on the form; left unchanged when omitted
+    phone: Optional[str] = Field(None, max_length=40)
 
 
 REQUIRED = {"EMPLOYMENT": ["company", "designation", "industry"],
@@ -1272,6 +1368,24 @@ REQUIRED = {"EMPLOYMENT": ["company", "designation", "industry"],
             "ENTREPRENEURSHIP": ["startup_name", "business_domain", "stage"]}
 OPTIONAL = {"EMPLOYMENT": ["notes"], "HIGHER_STUDIES": [], "ENTREPRENEURSHIP": []}
 STAGES = ["Idea", "Prototype / MVP", "Early revenue", "Growth"]
+
+
+def _clean_contact(email, phone):
+    """Validate the contact details from the form. -> (email or None, 10-digit mobile or None). None = not provided."""
+    em = (email or "").strip().lower()
+    if em and (len(em) > 200 or not importer.EMAIL_RE.match(em)):
+        raise HTTPException(422, "Please enter a valid email address")
+    digits = re.sub(r"[\s().-]", "", (phone or "").strip())
+    if digits:
+        if digits.startswith("+91"):
+            digits = digits[3:]
+        elif len(digits) == 12 and digits.startswith("91"):
+            digits = digits[2:]
+        elif len(digits) == 11 and digits.startswith("0"):
+            digits = digits[1:]
+        if not re.fullmatch(r"[6-9]\d{9}", digits):
+            raise HTTPException(422, "Please enter a valid 10-digit mobile number")
+    return em or None, digits or None
 
 
 @app.post("/api/public/submit", dependencies=[Depends(ratelimit.by_ip("public_write"))])
@@ -1293,6 +1407,7 @@ def public_submit(b: Submission):
             clean[k] = v
     if b.career_status == "ENTREPRENEURSHIP" and clean["stage"] not in STAGES:
         raise HTTPException(422, "Invalid stage")
+    new_email, new_phone = _clean_contact(b.email, b.phone)
     if b.income_band:
         if not income.valid(b.career_status, b.income_band):
             raise HTTPException(422, "Choose one of the listed income ranges")
@@ -1312,12 +1427,21 @@ def public_submit(b: Submission):
             if p["status"] == documents.REJECTED:
                 raise HTTPException(422, f"Your proof was not accepted: {p['rejection_reason']}. Please upload a new one.")
         again = r["status"] == "COMPLETED"
+        changed = {}                                   # contact details the person corrected, with the old values for the audit trail
+        if new_email and new_email != (r["email"] or ""):
+            changed["email"] = [r["email"], new_email]
+        if new_phone and new_phone != (r["phone"] or ""):
+            changed["phone"] = [r["phone"], new_phone]
+        if changed:
+            c.execute("UPDATE alumni SET email=COALESCE(?, email), phone=COALESCE(?, phone) WHERE id=?",
+                      (new_email if "email" in changed else None, new_phone if "phone" in changed else None, r["id"]))
         c.execute("UPDATE alumni SET status='COMPLETED', career_status=?, details=?, submitted_at=datetime('now'),"
                   " income_band=COALESCE(?, income_band), income_updated_at=CASE WHEN ? IS NULL THEN income_updated_at ELSE datetime('now') END,"
                   " verification_consent_at=CASE WHEN ? THEN datetime('now') ELSE verification_consent_at END WHERE id=?",
                   (b.career_status, json.dumps(clean), b.income_band, b.income_band, int(b.consent), r["id"]))
         audit.record(c, "public.submit", None, actor_email="(alumni link)", entity_type="alumni", entity_id=r["id"],
-                     detail={"career_status": b.career_status, "resubmission": again, "income_band": b.income_band, "consent": b.consent})
+                     detail={"career_status": b.career_status, "resubmission": again, "income_band": b.income_band, "consent": b.consent,
+                            **({"contact_changed": changed} if changed else {})})
         careers.record_submission(c, r["id"], b.career_status, clean)         # only writes what actually changed
         profiles.fill_from_submission(c, r["id"], b.career_status, clean)    # blanks only; never overwrites a chosen value
     return {"ok": True, "already_submitted": again}

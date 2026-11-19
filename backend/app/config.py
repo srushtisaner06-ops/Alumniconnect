@@ -34,7 +34,10 @@ TRUST_PROXY_HOPS = int(os.getenv("TRUST_PROXY_HOPS", "0"))
 # Private document storage (verification documents arrive in Phase 1). Never served as static files.
 STORAGE_BACKEND = os.getenv("STORAGE_BACKEND", "local")
 STORAGE_ROOT = os.getenv("STORAGE_ROOT", str(BASE / "data" / "private_files"))
-MAX_DOCUMENT_BYTES = int(os.getenv("MAX_DOCUMENT_BYTES", str(5 * 1024 * 1024)))
+# Largest verification-proof file accepted (default 1 GB). Files are streamed to disk in chunks, so a big file does not
+# fill memory, but it does use disk and upload time, and any proxy in front (nginx, a tunnel) has its own body-size limit.
+# Lower it for a production server, e.g. MAX_DOCUMENT_BYTES=52428800 for 50 MB.
+MAX_DOCUMENT_BYTES = int(os.getenv("MAX_DOCUMENT_BYTES", str(1024 * 1024 * 1024)))
 
 # ---- Phase 1: proof of career + income range on the alumni form -------------------------------
 # When on, a submission must carry an accepted proof upload, an income range and the person's consent.

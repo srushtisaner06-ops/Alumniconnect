@@ -18,6 +18,7 @@ import MyProfile from './pages/MyProfile.jsx'
 import Directory from './pages/Directory.jsx'
 import Connections from './pages/Connections.jsx'
 import Opportunities from './pages/Opportunities.jsx'
+import Events from './pages/Events.jsx'
 import Account from './pages/Account.jsx'
 import { ForgotPassword, ResetPassword } from './pages/PasswordReset.jsx'
 
@@ -34,6 +35,7 @@ const nav = [
   { to: '/dashboard/profile', label: 'My profile', perm: 'profile.own.read', hideFor: ['ADMIN', 'FACULTY'] },   // needs an alumni record, so alumni only (admins hold every permission but have no record)
   { to: '/dashboard/network', label: 'Alumni network', perm: 'directory.read', hideFor: ['ADMIN', 'FACULTY'] },   // staff already have the full directory
   { to: '/dashboard/opportunities', label: 'Opportunities', perm: 'opportunity.read' },                          // everyone signed in can read; posting needs opportunity.post
+  { to: '/dashboard/events', label: 'Events', perm: 'event.read' },                                              // everyone signed in; creating needs event.manage (admin)
   { to: '/dashboard/connections', label: 'Connections', perm: 'connection.use', hideFor: ['ADMIN', 'FACULTY'], badge: true },   // alumni only: connecting needs an alumni record
   { to: '/dashboard/account', label: 'Account', perm: null },                                             // everyone: password, sessions
 ]
@@ -106,6 +108,7 @@ export default function App() {
           <Route path="network" element={<Directory />} />
           <Route path="connections" element={<Connections />} />
           <Route path="opportunities" element={<Opportunities />} />
+          <Route path="events" element={<Events />} />
           <Route path="account" element={<Account />} />
           <Route path="verification" element={<Verification />} />
           <Route path="users" element={<Users />} />
